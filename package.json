@@ -1,6 +1,6 @@
 {
   "name": "droid-tycoon-overlay",
-  "version": "1.1.0",
+  "version": "1.0.1",
   "description": "Overlay app for Star Wars Droid Tycoon in Fortnite",
   "main": "dist/main/index.js",
   "scripts": {
