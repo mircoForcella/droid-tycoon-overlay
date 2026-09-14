@@ -65,7 +65,8 @@
       {
         "provider": "github",
         "owner": "mircoForcella",
-        "repo": "droid-tycoon-overlay"
+        "repo": "droid-tycoon-overlay",
+        "releaseType": "release"
       }
     ]
   }
