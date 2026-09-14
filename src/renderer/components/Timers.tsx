@@ -4,10 +4,12 @@ import { useStore } from '../store'
 // Spawn schedule (local time):
 // - Stellar: top of every hour (:00) — YELLOW
 // - Mythic: every hour at :55 — PINK/RED
-// - Galactic: 45-min grid anchored at midnight (:00/:15/:30/:45 cycling).
-//   A tick landing on :00 would overlap Stellar, so it fires at :45 instead —
-//   that hop is 30 min (e.g. 02:15 -> 02:45), the hop after it 60 min
-//   (02:45 -> 03:45). Never collides with :00 or :55.
+// - Galactic: chained 45-min cadence that dodges Stellar. After a :15 spawn,
+//   +45 would land on :00, so it fires at :45 instead (30-min hop, e.g.
+//   02:15 -> 02:45); every other hop is 45 min (02:45 -> 03:30). Net cycle
+//   repeats every 2 h: :15 + :45 on even hours, :30 on odd hours — flip
+//   GALACTIC_PARITY if double spawns ever show in odd hours.
+//   Hops are only ever 30/45 min. Never collides with :00 or :55.
 
 function nextOccurrence(minutes: number[]): Date {
   const now = new Date()
@@ -37,28 +39,28 @@ function fmtClock(d: Date): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-const GALACTIC_GRID_MS = 45 * 60 * 1000
+const GALACTIC_CYCLE_MS = 120 * 60 * 1000
+// 0 = double spawns (:15 + :45) in even hours, single :30 in odd hours.
+// Flip to 1 if double spawns are ever observed in odd hours.
+const GALACTIC_PARITY = 0
+const GALACTIC_MARKS = GALACTIC_PARITY === 0 ? [15, 45, 90] : [30, 75, 105]
 
-// Next Galactic spawn after `nowMs`: 45-min midnight-anchored grid, except a
-// tick on :00 (Stellar overlap) fires 15 min early at :45.
+// Next Galactic spawn after `nowMs`: chained 45-min hops, except a hop from
+// :15 goes to :45 same hour (30 min) instead of colliding with Stellar :00.
 function nextGalactic(nowMs: number): Date {
   const midnight = new Date(nowMs)
   midnight.setHours(0, 0, 0, 0)
   const t0 = midnight.getTime()
-  // Smallest grid tick strictly after now. At most two hops: a dodged :00
-  // tick falls through to the following grid tick.
-  let k = Math.floor((nowMs - t0) / GALACTIC_GRID_MS) + 1
-  for (let i = 0; i < 3; i++) {
-    const g = new Date(t0 + k * GALACTIC_GRID_MS)
-    if (g.getMinutes() === 0) {
-      const dodged = new Date(g.getTime() - 15 * 60 * 1000)
-      if (dodged.getTime() > nowMs) return dodged
-      k++
-      continue
+  const k = Math.floor((nowMs - t0) / GALACTIC_CYCLE_MS)
+  // Current + next cycle cover every case (a cycle holds 3 spawns).
+  for (let i = 0; i < 2; i++) {
+    const base = t0 + (k + i) * GALACTIC_CYCLE_MS
+    for (const m of GALACTIC_MARKS) {
+      const cand = new Date(base + m * 60 * 1000)
+      if (cand.getTime() > nowMs) return cand
     }
-    return g
   }
-  return new Date(t0 + k * GALACTIC_GRID_MS)
+  return new Date(t0 + (k + 2) * GALACTIC_CYCLE_MS + GALACTIC_MARKS[0] * 60 * 1000)
 }
 
 export function Timers({ bare = false, showGrip = false }: { bare?: boolean; showGrip?: boolean }) {
