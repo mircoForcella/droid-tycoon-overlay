@@ -1,0 +1,32 @@
+# Builds the overlay and publishes a GitHub Release on every v* tag.
+# The installed app picks the release up automatically (Setup tab → Updates).
+#
+# Usage:
+#   1. Bump "version" in package.json (e.g. 1.0.0 -> 1.1.0) and push.
+#   2. Tag it:  git tag v1.1.0 ; git push origin v1.1.0
+#   3. This workflow builds the NSIS installer + latest.yml and attaches
+#      them to the "v1.1.0" release. No local signing/upload needed.
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

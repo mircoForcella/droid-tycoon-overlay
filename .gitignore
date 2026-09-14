@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+ocr-assets/
+eng.traineddata
+test-cooked.png
+dist.log
+templates/*.png
+templates/*.jpg
+!templates/README.md
+templates/*.png
+templates/*.jpg
+!templates/README.md
+.DS_Store
+*.log
