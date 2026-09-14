@@ -4,35 +4,20 @@ const fs = require('fs')
 const { PNG } = require('pngjs')
 const { createWorker } = require('tesseract.js')
 
+// Teal-chroma isolate (see src/main/ocr.ts): income popups are bright teal
+// (~57,244,188) over dark pipes / bright sky. Luminance Otsu keeps the sky
+// and fragments glyphs; this keeps only teal as black-on-white, 2x upscale.
 function binarizeUpscale(src, w, h) {
-  const n = w * h
-  const lum = new Uint8Array(n)
-  for (let i = 0; i < n; i++) {
-    lum[i] = (src[i * 4] * 77 + src[i * 4 + 1] * 150 + src[i * 4 + 2] * 29) >> 8
-  }
-  const hist = new Array(256).fill(0)
-  for (let i = 0; i < n; i++) hist[lum[i]]++
-  let sum = 0
-  for (let t = 0; t < 256; t++) sum += t * hist[t]
-  let sumB = 0, wB = 0, best = -1, thresh = 128
-  for (let t = 0; t < 256; t++) {
-    wB += hist[t]
-    if (wB === 0) continue
-    const wF = n - wB
-    if (wF === 0) break
-    sumB += t * hist[t]
-    const mB = sumB / wB, mF = (sum - sumB) / wF
-    const between = wB * wF * (mB - mF) * (mB - mF)
-    if (between > best) { best = between; thresh = t }
-  }
-  console.log('otsu-threshold=' + thresh)
   const scale = 2, W = w * scale, H = h * scale
   const png = new PNG({ width: W, height: H })
   for (let y = 0; y < H; y++) {
     const sy = Math.min(h - 1, (y / scale) | 0)
     for (let x = 0; x < W; x++) {
       const sx = Math.min(w - 1, (x / scale) | 0)
-      const v = lum[sy * w + sx] > thresh ? 255 : 0
+      const si = (sy * w + sx) * 4
+      const r = src[si], g = src[si + 1], b = src[si + 2]
+      const isText = g > 110 && g - r > 45 && b - r > 15
+      const v = isText ? 0 : 255
       const o = (y * W + x) * 4
       png.data[o] = v; png.data[o + 1] = v; png.data[o + 2] = v; png.data[o + 3] = 255
     }
@@ -41,36 +26,53 @@ function binarizeUpscale(src, w, h) {
 }
 
 function parseIncomeText(text) {
-  const m = text.toLowerCase().replace(/\/s\s*$/, '').trim().match(/^([\d.]+)\s*([kmb])?$/)
+  const m = text.toLowerCase().replace(/\/s\s*$/, '').trim().match(/^([\d.]+)\s*([kmbt])?$/)
   if (!m) return null
-  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : 1
+  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : m[2] === 't' ? 1e12 : 1
   const v = parseFloat(m[1]) * mult
   return v > 0 ? v : null
 }
 
 function parseFuzzyIncome(text) {
-  const m = text.trim().match(/^([\d.]+)\s*([kKmMbB])\s*[/lI17|]\s*[sS5]?$/)
+  const m = text.trim().match(/^([\d.]+)\s*([kKmMbBtT])\s*[/lI17|]\s*[sS5]?$/)
   if (!m) return null
-  const mult = m[2].toLowerCase() === 'k' ? 1e3 : m[2].toLowerCase() === 'm' ? 1e6 : 1e9
+  const c = m[2].toLowerCase()
+  const mult = c === 'k' ? 1e3 : c === 'm' ? 1e6 : c === 'b' ? 1e9 : 1e12
   const v = parseFloat(m[1]) * mult
   return v > 0 ? v : null
 }
 
-function extractSpots(lines) {
+// lines: [{text, bbox:{x0,y0,x1,y1}}] in cooked (2x) coords.
+// frame: full-image geometry for rx/ry (0..1 relative). Mirrors ocr.ts.
+function extractSpots(lines, frame) {
   const spots = []
-  const push = (raw) => {
+  const push = (raw, line) => {
     const value = parseIncomeText(raw) ?? parseFuzzyIncome(raw)
     if (value === null) return
     if (spots.some(s => Math.abs(s.value - value) / value < 0.001)) return
-    spots.push({ text: raw.trim(), value })
+    const cx = (line.bbox.x0 + line.bbox.x1) / 2 / frame.upscale
+    const cy = (line.bbox.y0 + line.bbox.y1) / 2 / frame.upscale
+    spots.push({
+      text: raw.trim(),
+      value,
+      rx: (frame.originX + cx) / frame.frameW,
+      ry: (frame.originY + cy) / frame.frameH,
+    })
   }
   for (const line of lines) {
-    const strict = /([\d.]+\s*[kmb]?\s*\/s)/gi
+    // Strict rate match: target rates ALWAYS end in /s. Accumulations like
+    // "15.50B" or "128.48T" must never become spots.
+    const strict = /([\d.]+\s*[kmbt]?\s*\/s)/gi
     let m, found = false
-    while ((m = strict.exec(line)) !== null) { found = true; push(m[1]) }
-    if (!found && /[\d]/.test(line) && line.length < 24) push(line)
+    while ((m = strict.exec(line.text)) !== null) { found = true; push(m[1], line) }
+    // Whole-line fallback for "900Kl5"-style misreads ONLY: requires an /s
+    // marker at END of line (or OCR-mangled l/I/1 + s/5). Blocks bare totals + HUD numbers.
+    // Anchored: a bare "15" (1+5) must not count as l/1 + s/5.
+    const hasRateMarker = /\/\s*s\s*$/i.test(line.text) || /[/lI17|]\s*[sS5]\s*$/.test(line.text)
+    if (!found && hasRateMarker && /[\d]/.test(line.text) && line.text.length < 24) push(line.text, line)
   }
-  return spots.sort((a, b) => a.value - b.value)
+  const dist2 = (s) => (s.rx - 0.5) * (s.rx - 0.5) + (s.ry - 0.5) * (s.ry - 0.5)
+  return spots.sort((a, b) => dist2(a) - dist2(b) || a.value - b.value)
 }
 
 (async () => {
@@ -90,17 +92,31 @@ function extractSpots(lines) {
   const t0 = Date.now()
   const worker = await createWorker('eng')
   console.log('worker-ready in=' + (Date.now() - t0) + 'ms')
+  await worker.setParameters({
+    tessedit_pageseg_mode: '6',
+    tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ ',
+  })
   const t1 = Date.now()
-  const { data } = await worker.recognize(cooked)
+  // blocks:true is required for bboxes (else all spots collapse to center)
+  const { data } = await worker.recognize(cooked, {}, { blocks: true })
   console.log('recognize in=' + (Date.now() - t1) + 'ms')
   const lines = []
-  for (const b of (data.blocks || [])) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) lines.push(l.text)
+  for (const b of (data.blocks || [])) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) lines.push(l)
   if (lines.length === 0 && (data.text || '').trim()) {
-    for (const t of data.text.split('\n')) if (t.trim()) lines.push(t)
+    const W = cw * 2, H = ch * 2
+    for (const t of data.text.split('\n')) {
+      if (t.trim().length === 0) continue
+      lines.push({ text: t, bbox: { x0: 0, y0: 0, x1: W, y1: H } })
+    }
   }
   console.log('lines=' + lines.length)
-  lines.slice(0, 15).forEach((t, i) => console.log('L' + i + ': ' + JSON.stringify(t)))
-  const spots = extractSpots(lines)
+  lines.slice(0, 15).forEach((l, i) => console.log('L' + i + ': ' + JSON.stringify(l.text) + ' bbox=' + JSON.stringify(l.bbox)))
+  const spots = extractSpots(lines, { frameW: img.width, frameH: img.height, originX: cx, originY: cy, upscale: 2 })
   console.log('SPOTS=' + JSON.stringify(spots))
+  // Explain winner like App.tsx does (closest-first, first unique table match)
+  spots.forEach((s, i) => {
+    const d = Math.hypot(s.rx - 0.5, s.ry - 0.5)
+    console.log(`rank${i}: ${s.text} = ${s.value} rx=${s.rx.toFixed(3)} ry=${s.ry.toFixed(3)} distCenter=${d.toFixed(3)}`)
+  })
   await worker.terminate()
 })().catch(e => { console.error('FATAL', e); process.exit(1) })

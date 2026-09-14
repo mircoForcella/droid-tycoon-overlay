@@ -1,8 +1,10 @@
 // Offline OCR income spotter (tesseract.js, eng only).
 // Tuned for Fortnite's chunky outlined display font:
-//   1. grayscale -> Otsu auto-threshold -> 2x upscale (pure JS, no new runtime deps)
-//   2. pass 1 on the binarized image, pass 2 on the raw frame as fallback
-//   3. strict `/s` match plus a fallback for common glyph confusions (/ -> l, s -> 5)
+//   1. teal-chroma isolate -> black-on-white -> 2x upscale (pure JS, no new runtime deps)
+//   2. single pass with PSM SINGLE_BLOCK + rate-token whitelist
+//   3. strict `/s` match (K/M/B/T) plus a fallback for common glyph confusions (/ -> l, s -> 5)
+//      gated on an /s marker so accumulations like "15.50B" never become spots.
+//   4. spots ranked by distance to screen center (crosshair) — closest first.
 // On-demand only. Never runs continuously.
 //
 // Packaging note: the tesseract worker thread + wasm engine are shipped as
@@ -58,36 +60,12 @@ async function getWorker(): Promise<Worker> {
   return workerPromise
 }
 
-// Binarize bright display text away from busy 3D backgrounds:
-// luminance -> Otsu threshold -> 2x nearest-neighbor upscale -> PNG.
+// Income popups use a distinctive bright teal fill (sampled ~57,244,188 on
+// shot1.png) over dark pipes / bright sky. Luminance-only Otsu keeps the sky
+// and fragments the thin outlined glyphs, so Tesseract sees nothing.
+// Filter by chroma instead: black-on-white where the pixel is teal-ish,
+// then 2x nearest-neighbor upscale (pure JS, no new runtime deps).
 function binarizeUpscale(src: Buffer, w: number, h: number): Buffer {
-  const n = w * h
-  const lum = new Uint8Array(n)
-  for (let i = 0; i < n; i++) {
-    lum[i] = (src[i * 4] * 77 + src[i * 4 + 1] * 150 + src[i * 4 + 2] * 29) >> 8
-  }
-  const hist = new Array<number>(256).fill(0)
-  for (let i = 0; i < n; i++) hist[lum[i]]++
-  let sum = 0
-  for (let t = 0; t < 256; t++) sum += t * hist[t]
-  let sumB = 0
-  let wB = 0
-  let best = -1
-  let thresh = 128
-  for (let t = 0; t < 256; t++) {
-    wB += hist[t]
-    if (wB === 0) continue
-    const wF = n - wB
-    if (wF === 0) break
-    sumB += t * hist[t]
-    const mB = sumB / wB
-    const mF = (sum - sumB) / wF
-    const between = wB * wF * (mB - mF) * (mB - mF)
-    if (between > best) {
-      best = between
-      thresh = t
-    }
-  }
   const scale = 2
   const W = w * scale
   const H = h * scale
@@ -96,7 +74,14 @@ function binarizeUpscale(src: Buffer, w: number, h: number): Buffer {
     const sy = Math.min(h - 1, (y / scale) | 0)
     for (let x = 0; x < W; x++) {
       const sx = Math.min(w - 1, (x / scale) | 0)
-      const v = lum[sy * w + sx] > thresh ? 255 : 0
+      const si = (sy * w + sx) * 4
+      const r = src[si]
+      const g = src[si + 1]
+      const b = src[si + 2]
+      // Teal fill: high green, green well above red, blue above red.
+      // Rejects dark pipes (low saturation) and bright sky (R≈G≈B).
+      const isText = g > 110 && g - r > 45 && b - r > 15
+      const v = isText ? 0 : 255
       const o = (y * W + x) * 4
       png.data[o] = v
       png.data[o + 1] = v
@@ -113,19 +98,20 @@ interface OcrLine {
 }
 
 function parseIncomeText(text: string): number | null {
-  const m = text.toLowerCase().replace(/\/s\s*$/, '').trim().match(/^([\d.]+)\s*([kmb])?$/)
+  const m = text.toLowerCase().replace(/\/s\s*$/, '').trim().match(/^([\d.]+)\s*([kmbt])?$/)
   if (!m) return null
-  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : 1
+  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : m[2] === 't' ? 1e12 : 1
   const v = parseFloat(m[1]) * mult
   return v > 0 ? v : null
 }
 
 // Fallback for glyph confusions on outlined fonts: "900Kl5" -> 900K.
-// Only trusted with a K/M/B magnitude suffix (bare numbers are everywhere in UI).
+// Only trusted with a K/M/B/T magnitude suffix (bare numbers are everywhere in UI).
 function parseFuzzyIncome(text: string): number | null {
-  const m = text.trim().match(/^([\d.]+)\s*([kKmMbB])\s*[/lI17|]\s*[sS5]?$/)
+  const m = text.trim().match(/^([\d.]+)\s*([kKmMbBtT])\s*[/lI17|]\s*[sS5]?$/)
   if (!m) return null
-  const mult = m[2].toLowerCase() === 'k' ? 1e3 : m[2].toLowerCase() === 'm' ? 1e6 : 1e9
+  const c = m[2].toLowerCase()
+  const mult = c === 'k' ? 1e3 : c === 'm' ? 1e6 : c === 'b' ? 1e9 : 1e12
   const v = parseFloat(m[1]) * mult
   return v > 0 ? v : null
 }
@@ -149,19 +135,30 @@ function extractSpots(
     })
   }
   for (const line of lines) {
-    const strict = /([\d.]+\s*[kmb]?\s*\/s)/gi
+    // Strict rate match: a target rate ALWAYS ends in /s. Accumulated totals
+    // like "15.50B" or "128.48T" have no /s and must never become spots.
+    const strict = /([\d.]+\s*[kmbt]?\s*\/s)/gi
     let m: RegExpExecArray | null
     let found = false
     while ((m = strict.exec(line.text)) !== null) {
       found = true
       push(m[1], line)
     }
-    // Whole-line fallback: catches "900Kl5" style misreads
-    if (!found && /[\d]/.test(line.text) && line.text.length < 24) {
+    // Whole-line fallback: catches "900Kl5" style misreads ONLY.
+    // Requires an /s marker at END of line (or its OCR-mangled variants);
+    // otherwise bare accumulations ("15.50B") and HUD numbers leak in.
+    // Anchored: a bare "15" (1+5) must not count as l/1 + s/5.
+    // Unsupported suffixes are rejected by the parsers (K/M/B/T only).
+    const hasRateMarker = /\/\s*s\s*$/i.test(line.text) || /[/lI17|]\s*[sS5]\s*$/.test(line.text)
+    if (!found && hasRateMarker && /[\d]/.test(line.text) && line.text.length < 24) {
       push(line.text, line)
     }
   }
-  return spots.sort((a, b) => a.value - b.value)
+  // F9 UX is "aim at the droid": the crosshair-adjacent popup is near screen
+  // center (0.5, 0.5). Try the closest spot first — value-ascending order
+  // picks whatever happens to be smallest, ignoring where you aim.
+  const dist2 = (s: IncomeSpot) => (s.rx - 0.5) * (s.rx - 0.5) + (s.ry - 0.5) * (s.ry - 0.5)
+  return spots.sort((a, b) => dist2(a) - dist2(b) || a.value - b.value)
 }
 
 export interface SpotResult {
@@ -229,7 +226,22 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
   } catch {}
   dbg(`start crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
-  const recognized = await worker.recognize(cooked)
+  // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
+  // fully-automatic segmentation, and a tight whitelist stops the engine
+  // wasting effort on pipes/sky glyphs. Verified on shot1.png:
+  // default PSM+charset reads nothing; this reads "92.80K/s" cleanly.
+  try {
+    await (worker as unknown as { setParameters: (p: Record<string, string>) => Promise<void> }).setParameters({
+      tessedit_pageseg_mode: '6',
+      tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ '
+    })
+  } catch {}
+  // blocks:true is required — without it tesseract.js returns text only
+  // (blocks=null) and every spot collapses to the crop center, making
+  // crosshair-distance ranking impossible. Verified on shot1.png.
+  const recognized = await (worker as unknown as {
+    recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
+  }).recognize(cooked, {}, { blocks: true })
   const lines = linesOf((recognized as { data: unknown }).data)
   const spots = extractSpots(lines, {
     frameW: crop.frameW,

@@ -98,9 +98,18 @@ function App() {
         st.setSpots(spots)
         // Instant path: a station picker is already open (armed) and the read
         // matches exactly one droid → place it immediately, no more taps.
+        // F9 UX is "aim at the droid": try the crosshair-closest spot first.
+        // Spots arrive center-ranked from main, but re-sort here so the
+        // choice never depends on transport order (value-ascending used to
+        // pick whatever was smallest, ignoring where you aim).
         const armed = st.pickerSlot
         if (armed && spots.length > 0) {
-          for (const sp of spots) {
+          const ordered = [...spots].sort(
+            (a, b) =>
+              (a.rx - 0.5) * (a.rx - 0.5) + (a.ry - 0.5) * (a.ry - 0.5) -
+              ((b.rx - 0.5) * (b.rx - 0.5) + (b.ry - 0.5) * (b.ry - 0.5))
+          )
+          for (const sp of ordered) {
             const hits = findByIncome(sp.value)
             if (hits.length === 1) {
               st.placeDroid(armed, hits[0].def.id, hits[0].quality)

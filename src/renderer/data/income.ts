@@ -54,11 +54,12 @@ export function formatIncome(n: number): string {
   return `${Math.round(n)}/s`
 }
 
-// Accepts "1440", "1.44k", "1.44k/s", "550" ...
+// Accepts "1440", "1.44k", "1.44k/s", "550", "128.48t/s" ...
+// K/M/B/T only — anything else returns null (unsupported suffix blocked).
 export function parseIncome(text: string): number | null {
-  const m = text.toLowerCase().replace(/\/s\s*$/, '').trim().match(/^([\d.]+)\s*([kmb])?$/)
+  const m = text.toLowerCase().replace(/\/s\s*$/, '').trim().match(/^([\d.]+)\s*([kmbt])?$/)
   if (!m) return null
-  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : 1
+  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : m[2] === 't' ? 1e12 : 1
   const v = parseFloat(m[1]) * mult
   return v > 0 ? v : null
 }
