@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 
 // Spawn schedule (local time):
-// - Galactic: every 15 min (:00, :15, :30, :45) — PURPLE
 // - Stellar: top of every hour (:00) — YELLOW
-// - Mythic: every hour at :55 — PINK/RED (unchanged)
+// - Mythic: every hour at :55 — PINK/RED
+// - Galactic: every hour at :45 — PURPLE (never collides with :00 or :55)
 
 function nextOccurrence(minutes: number[]): Date {
   const now = new Date()
@@ -43,14 +43,14 @@ export function Timers({ bare = false, showGrip = false }: { bare?: boolean; sho
   }, [])
 
   const now = Date.now()
-  const galactic = nextOccurrence([0, 15, 30, 45])
   const stellar = nextOccurrence([0])
   const mythic = nextOccurrence([55])
+  const galactic = nextOccurrence([45])
 
   const cards = [
-    { name: 'Galactic', at: galactic, cls: 'galactic', label: 'Every 15 min' },
     { name: 'Stellar', at: stellar, cls: 'stellar', label: 'Top of hour' },
-    { name: 'Mythic', at: mythic, cls: 'mythic', label: 'At :55 hourly' }
+    { name: 'Mythic', at: mythic, cls: 'mythic', label: 'At :55 hourly' },
+    { name: 'Galactic', at: galactic, cls: 'galactic', label: 'At :45 hourly' }
   ]
 
   const opacity = useStore(s => s.timerBgOpacity) / 100

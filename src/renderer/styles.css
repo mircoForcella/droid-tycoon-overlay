@@ -126,7 +126,7 @@ body { background: transparent; color: var(--text); }
 .c3po-toggle .desc { font-size: 11px; color: var(--text-dim); margin-left: auto; }
 
 .timer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.timer-card { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
+.timer-card { background: rgba(0,0,0,0.3); border: 2px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
 .timer-card.mythic { border-color: #ff3366; }
 .timer-card.legendary { border-color: #ffaa00; }
 .timer-card.epic { border-color: #aa44ff; }
@@ -149,7 +149,7 @@ body { background: transparent; color: var(--text); }
 .timer-grip { color: var(--text-dim); opacity: 0.6; font-size: 13px; letter-spacing: -2px; cursor: grab; user-select: none; }
 .timer-chip {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
-  background: transparent; border: 1.5px solid; border-radius: 6px;
+  background: transparent; border: 3px solid; border-radius: 6px;
   padding: 3px 10px; min-width: 76px;
 }
 .timer-chip.galactic { border-color: #b45cff; }
