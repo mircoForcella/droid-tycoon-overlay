@@ -182,20 +182,18 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   } catch {}
   const crops = await captureAllCenterCrops()
   if (crops.length === 0) return { spots: [], meta: { frameW: 0, frameH: 0, lines: 0, sample: 'no-frame', pass: 'none' } }
-  // Preferred display (user's Fortnite monitor) first, then brightest.
-  // Single crop keeps reads near-instant.
-  const ordered = displayId !== null
-    ? [...crops].sort((a, b) => (b.displayId === displayId ? 1 : 0) - (a.displayId === displayId ? 1 : 0))
-    : crops
-  const crop = ordered[0]
-  const thumb = nativeImage.createFromBuffer(crop.png)
-  const size = thumb.getSize()
-  try {
-    await fs.writeFile(join(capDir, 'spot-raw.png'), crop.png)
-  } catch {}
+  // F9 reads the game monitor, not the brightest one: explicit choice first,
+  // then primary display, then the rest brightest-first as fallback.
+  // (Brightest-first alone kept reading the user's second monitor.)
+  const preferred = displayId ?? crops.find(c => c.primary)?.displayId ?? null
+  const ordered = [...crops].sort((a, b) =>
+    ((b.displayId === preferred) ? 1 : 0) - ((a.displayId === preferred) ? 1 : 0) ||
+    Number(b.primary) - Number(a.primary) ||
+    b.brightness - a.brightness
+  )
 
   // Page shape: blocks[] -> paragraphs[] -> lines[] (there is NO top-level `lines`).
-  const linesOf = (data: unknown): OcrLine[] => {
+  const linesOf = (data: unknown, size: { width: number; height: number }): OcrLine[] => {
     const d = data as {
       text?: string
       blocks?: Array<{ paragraphs?: Array<{ lines?: OcrLine[] }> }> | null
@@ -226,65 +224,83 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     } catch {}
   }
   const t0 = Date.now()
-  const raw = thumb.toBitmap()
-  dbg(`start crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
 
-  // Shared frame geometry for both passes.
-  const frame = {
-    frameW: crop.frameW,
-    frameH: crop.frameH,
-    originX: crop.originX,
-    originY: crop.originY,
-    scale: crop.scale
-  }
-
-  // Pass 1 (primary): PP-OCRv5 recognition on teal-mask line strips.
-  // Strictly better than Tesseract on game font (shot1: exact "15.50B";
-  // shot2: keeps the leading 9 in "92.80K/s"). Any failure — missing
-  // models, no native binding — falls through to the Tesseract pass.
   let lines: OcrLine[] = []
+  let spots: IncomeSpot[] = []
   let upscale = PPOCR_UPSCALE
   let pass = 'ppocr'
-  try {
-    const { recognizeLines } = await import('./ppocr')
-    const tPp = Date.now()
-    lines = await recognizeLines(raw, size.width, size.height)
-    dbg(`ppocr in=${Date.now() - tPp}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
-  } catch (e) {
-    dbg(`ppocr failed, falling back to tesseract: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
-    lines = []
-  }
-  let spots = extractSpots(lines, { ...frame, upscale })
+  let size = { width: 0, height: 0 }
 
-  if (spots.length === 0) {
-    // Pass 2 (fallback): Tesseract on the binarized + 3x upscaled crop.
-    // Runs when pass 1 yields no usable spots — a missed rate label gets a
-    // second chance; genuine negatives just take a few seconds longer.
-    // Worker spins up lazily here so PP-OCR hits never pay for it.
-    const worker = await getWorker()
-    const cooked = binarizeUpscale(raw, size.width, size.height)
+  // Try each monitor's crop in order; first crop with spots wins.
+  // spot-raw.png always holds the crop that produced the result (or the
+  // last one tried), so a wrong-monitor read is diagnosable from disk.
+  for (const [ci, crop] of ordered.entries()) {
+    const thumb = nativeImage.createFromBuffer(crop.png)
+    size = thumb.getSize()
+    const raw = thumb.toBitmap()
     try {
-      await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
+      await fs.writeFile(join(capDir, 'spot-raw.png'), crop.png)
     } catch {}
-    // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
-    // fully-automatic segmentation, and a tight whitelist stops the engine
-    // wasting effort on pipes/sky glyphs.
+    dbg(`try crop ${ci + 1}/${ordered.length} display=${crop.displayId}${crop.primary ? ' (primary)' : ''} crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
+
+    // Shared frame geometry for both passes.
+    const frame = {
+      frameW: crop.frameW,
+      frameH: crop.frameH,
+      originX: crop.originX,
+      originY: crop.originY,
+      scale: crop.scale
+    }
+
+    // Pass 1 (primary): PP-OCRv5 recognition on teal-mask line strips.
+    // Strictly better than Tesseract on game font (shot1: exact "15.50B";
+    // shot2: keeps the leading 9 in "92.80K/s"). Any failure — missing
+    // models, no native binding — falls through to the Tesseract pass.
+    lines = []
+    upscale = PPOCR_UPSCALE
+    pass = 'ppocr'
     try {
-      await (worker as unknown as { setParameters: (p: Record<string, string>) => Promise<void> }).setParameters({
-        tessedit_pageseg_mode: '6',
-        tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ '
-      })
-    } catch {}
-    // blocks:true is required — without it tesseract.js returns text only
-    // (blocks=null) and every spot collapses to the crop center, making
-    // crosshair-distance ranking impossible. Verified on shot1.png.
-    const recognized = await (worker as unknown as {
-      recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
-    }).recognize(cooked, {}, { blocks: true })
-    lines = linesOf((recognized as { data: unknown }).data)
-    upscale = 3
-    pass = 'center-crop'
+      const { recognizeLines } = await import('./ppocr')
+      const tPp = Date.now()
+      lines = await recognizeLines(raw, size.width, size.height)
+      dbg(`ppocr in=${Date.now() - tPp}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+    } catch (e) {
+      dbg(`ppocr failed, falling back to tesseract: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
+      lines = []
+    }
     spots = extractSpots(lines, { ...frame, upscale })
+
+    if (spots.length === 0) {
+      // Pass 2 (fallback): Tesseract on the binarized + 3x upscaled crop.
+      // Runs when pass 1 yields no usable spots — a missed rate label gets a
+      // second chance; genuine negatives just take a few seconds longer.
+      // Worker spins up lazily here so PP-OCR hits never pay for it.
+      const worker = await getWorker()
+      const cooked = binarizeUpscale(raw, size.width, size.height)
+      try {
+        await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
+      } catch {}
+      // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
+      // fully-automatic segmentation, and a tight whitelist stops the engine
+      // wasting effort on pipes/sky glyphs.
+      try {
+        await (worker as unknown as { setParameters: (p: Record<string, string>) => Promise<void> }).setParameters({
+          tessedit_pageseg_mode: '6',
+          tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ '
+        })
+      } catch {}
+      // blocks:true is required — without it tesseract.js returns text only
+      // (blocks=null) and every spot collapses to the crop center, making
+      // crosshair-distance ranking impossible. Verified on shot1.png.
+      const recognized = await (worker as unknown as {
+        recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
+      }).recognize(cooked, {}, { blocks: true })
+      lines = linesOf((recognized as { data: unknown }).data, size)
+      upscale = 3
+      pass = 'center-crop'
+      spots = extractSpots(lines, { ...frame, upscale })
+    }
+    if (spots.length > 0) break
   }
   dbg(`done in=${Date.now() - t0}ms pass=${pass} lines=${lines.length} spots=${spots.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
 

@@ -59,18 +59,23 @@ export interface DisplayCrop {
   originX: number // crop origin in display coords
   originY: number
   scale: number // thumbnail px per display px
+  primary: boolean // Windows primary display (where the game usually is)
+  brightness: number // mean crop brightness, brightest-first tiebreak
 }
 
-// Center-crop EVERY screen. Screen-source ordering is not guaranteed to
-// match display enumeration (this exact bug shipped a black frame), so we
-// never guess — callers OCR each crop and merge. Sorted brightest-first so
-// the game screen (bright 3D scene) beats dark desktops.
+// Center-crop EVERY screen. Sources are matched to displays by display_id —
+// pairing by list index is WRONG (source order is not guaranteed to match
+// display enumeration; that exact bug shipped a black frame once and reads
+// the wrong monitor for F9). Primary display sorts first; brightness only
+// breaks ties. Callers try crops in order until one yields spots.
 export async function captureAllCenterCrops(
   cropW = 900,
   cropH = 600
 ): Promise<DisplayCrop[]> {
   const displays = screen.getAllDisplays()
   if (displays.length === 0) return []
+  const primaryId = screen.getPrimaryDisplay()?.id
+  const byId = new Map(displays.map(d => [d.id, d]))
   const maxW = Math.max(...displays.map(d => d.bounds.width))
   const maxH = Math.max(...displays.map(d => d.bounds.height))
   const sources = await desktopCapturer.getSources({
@@ -79,17 +84,14 @@ export async function captureAllCenterCrops(
   })
   if (sources.length === 0) return []
 
-  const crops: Array<DisplayCrop & { brightness: number }> = []
-  // Pair by index only while both lists have entries; mismatched tails are
-  // skipped (logged) instead of reusing the last entry with wrong metadata.
-  const n = Math.min(displays.length, sources.length)
-  if (displays.length !== sources.length) {
-    console.log(`[capture] display/source count mismatch: ${displays.length} displays, ${sources.length} sources — pairing first ${n}`)
-  }
-  for (let i = 0; i < n; i++) {
-    const src = sources[i]
-    const disp = displays[i]
-    if (!src || src.thumbnail.isEmpty()) continue
+  const crops: DisplayCrop[] = []
+  for (const src of sources) {
+    if (src.thumbnail.isEmpty()) continue
+    const disp = byId.get(Number(src.display_id))
+    if (!disp) {
+      console.log(`[capture] screen source "${src.name}" has display_id=${src.display_id} matching no display — skipped`)
+      continue
+    }
     const thumb = src.thumbnail
     const size = thumb.getSize()
     const scale = size.width / disp.bounds.width
@@ -114,12 +116,11 @@ export async function captureAllCenterCrops(
       originX: disp.bounds.x + x / scale,
       originY: disp.bounds.y + y / scale,
       scale,
+      primary: disp.id === primaryId,
       brightness: count > 0 ? sum / count : 0
     })
   }
-  return crops
-    .sort((a, b) => b.brightness - a.brightness)
-    .map(({ brightness: _b, ...rest }) => rest)
+  return crops.sort((a, b) => Number(b.primary) - Number(a.primary) || b.brightness - a.brightness)
 }
 
 // Blank-frame guard: some captures (minimized/occluded/exclusive-fullscreen
