@@ -253,6 +253,97 @@ function setTimersDetached(detached: boolean) {
   broadcast('timers-detached-changed', detached)
 }
 
+// ---- Spot match popup: its own centered window (never inside the panel) ----
+// Opens only when an F9/Button read matches table entries. Transparent and
+// chromeless like the timer float: just cards + station buttons floating.
+interface SpotPayload {
+  text: string
+  value: number
+  rx: number
+  ry: number
+}
+
+let spotWin: BrowserWindow | null = null
+let pendingSpots: SpotPayload[] = []
+let spotReqSeq = 0
+const spotReqs = new Map<number, (res: { ok: boolean; message: string }) => void>()
+
+function openSpotWindow(spots: SpotPayload[]) {
+  pendingSpots = spots
+  if (spotWin && !spotWin.isDestroyed()) {
+    try {
+      spotWin.webContents.send('spot-data', spots)
+      spotWin.showInactive()
+      spotWin.moveTop()
+    } catch {}
+    return
+  }
+  const primary = screen.getPrimaryDisplay()
+  const W = 600
+  const H = 700
+  const x = Math.round(primary.bounds.x + (primary.bounds.width - W) / 2)
+  const y = Math.max(primary.bounds.y, Math.round(primary.bounds.y + (primary.bounds.height - H) / 2))
+  spotWin = new BrowserWindow({
+    x, y, width: W, height: H,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: true,
+    resizable: false,
+    movable: true,
+    fullscreenable: false,
+    hasShadow: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+  spotWin.setMenuBarVisibility(false)
+  spotWin.setAlwaysOnTop(true, 'screen-saver')
+  spotWin.on('closed', () => {
+    spotWin = null
+  })
+  spotWin.webContents.on('did-finish-load', () => {
+    log('spot window loaded OK')
+    try {
+      spotWin?.webContents.send('spot-data', pendingSpots)
+    } catch {}
+  })
+  spotWin.webContents.on('did-fail-load', (_e, code, desc) => log(`spot window FAILED ${code} ${desc}`))
+  if (app.isPackaged) {
+    spotWin.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'spot' })
+  } else {
+    spotWin.loadURL('http://localhost:5173/#spot')
+  }
+  try {
+    spotWin.showInactive()
+  } catch {}
+  log('spot window created')
+}
+
+function closeSpotWindow() {
+  try {
+    spotWin?.destroy()
+  } catch {}
+  spotWin = null
+}
+
+// Placement runs in ONE panel window (first on the primary display) —
+// broadcasting the request to every panel would place N times.
+function spotPanelTarget(): BrowserWindow | null {
+  const alive = windows.filter(w => !w.isDestroyed())
+  if (alive.length === 0) return null
+  try {
+    const primaryId = screen.getPrimaryDisplay().id
+    return alive.find(w => screen.getDisplayMatching(w.getBounds()).id === primaryId) ?? alive[0]
+  } catch {
+    return alive[0]
+  }
+}
+
 function allWindows(): BrowserWindow[] {
   return timerWin ? [...windows, timerWin] : windows
 }
@@ -536,6 +627,41 @@ app.whenReady().then(async () => {
       return { spots: [], meta: { frameW: 0, frameH: 0, lines: 0, sample: `error: ${e}` } }
     }
   })
+
+  ipcMain.handle('open-spot-window', (_, spots: SpotPayload[]) => {
+    openSpotWindow(Array.isArray(spots) ? spots : [])
+  })
+  ipcMain.handle('get-spot-data', () => pendingSpots)
+  ipcMain.handle('spot-place', async (_, payload: { droidId: string; quality: string; station: string }) => {
+    const target = spotPanelTarget()
+    if (!target) return { ok: false, message: 'Overlay panel is not running.' }
+    const reqId = ++spotReqSeq
+    const res = await new Promise<{ ok: boolean; message: string }>(resolve => {
+      spotReqs.set(reqId, resolve)
+      try {
+        target.webContents.send('spot-place-request', { ...payload, reqId })
+      } catch {
+        spotReqs.delete(reqId)
+        resolve({ ok: false, message: 'Could not reach the overlay panel.' })
+        return
+      }
+      setTimeout(() => {
+        if (spotReqs.has(reqId)) {
+          spotReqs.delete(reqId)
+          resolve({ ok: false, message: 'Panel did not respond in time.' })
+        }
+      }, 8000)
+    })
+    return res
+  })
+  ipcMain.on('spot-place-done', (_, res: { reqId: number; ok: boolean; message: string }) => {
+    const r = spotReqs.get(res?.reqId)
+    if (r) {
+      spotReqs.delete(res.reqId)
+      r({ ok: !!res.ok, message: String(res.message ?? '') })
+    }
+  })
+  ipcMain.on('spot-close', () => closeSpotWindow())
 
   ipcMain.handle('capture-game-window', async () => {
     const png = await captureGameWindow()

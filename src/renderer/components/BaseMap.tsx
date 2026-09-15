@@ -210,17 +210,16 @@ export function SpotButton() {
       const res = await window.electronAPI.spotIncomes()
       const spots = res?.spots ?? []
       useStore.getState().setSpots(spots)
-      useStore.getState().setSpotMatchOpen(false)
       if (spots.some(sp => findByIncome(sp.value).length > 0)) {
-        useStore.getState().setSpotMatchOpen(true)
-      } else if (spots.length === 0) {
-        const meta = res?.meta
-        setNote(
-          meta && meta.lines === 0
-            ? 'OCR saw no text at all — popup may not have been visible, or frame was black (see app.log "ocr" lines).'
-            : 'No income text caught - hover the droid in-game and press F9 instead (clicking moves the mouse off the popup).'
-        )
+        window.electronAPI.openSpotWindow?.(spots)
+        return
       }
+      const meta = res?.meta
+      setNote(
+        meta && meta.lines === 0
+          ? 'OCR saw no text at all — popup may not have been visible, or frame was black (see app.log "ocr" lines).'
+          : 'No income text caught - hover the droid in-game and press F9 instead (clicking moves the mouse off the popup).'
+      )
     } finally {
       setBusy(false)
     }

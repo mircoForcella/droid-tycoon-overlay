@@ -26,6 +26,13 @@ declare global {
       onDetectionUpdate: (cb: (p: { at: number; matches: Array<{ droidId: string; confidence: number; rx: number; ry: number }> }) => void) => () => void
       onLiveScanChanged: (cb: (enabled: boolean) => void) => () => void
       onIncomeSpots: (cb: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => void) => () => void
+      openSpotWindow: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => Promise<void>
+      getSpotData: () => Promise<Array<{ text: string; value: number; rx: number; ry: number }>>
+      onSpotData: (cb: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => void) => () => void
+      spotPlace: (payload: { droidId: string; quality: string; station: string }) => Promise<{ ok: boolean; message: string }>
+      spotClose: () => void
+      onSpotPlaceRequest: (cb: (req: { droidId: string; quality: string; station: string; reqId: number }) => void) => () => void
+      reportSpotPlaceDone: (res: { reqId: number; ok: boolean; message: string }) => void
       onSpotStatus: (cb: (status: string) => void) => () => void
       getVersion: () => Promise<string>
       checkForUpdates: () => Promise<void>

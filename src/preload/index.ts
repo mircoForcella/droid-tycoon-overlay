@@ -56,6 +56,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onIncomeSpots: (callback: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => void): Unsub => {
     return sub('income-spots', (_, spots: Array<{ text: string; value: number; rx: number; ry: number }>) => callback(spots))
   },
+  openSpotWindow: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => ipcRenderer.invoke('open-spot-window', spots),
+  getSpotData: () => ipcRenderer.invoke('get-spot-data'),
+  onSpotData: (callback: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => void): Unsub => {
+    return sub('spot-data', (_, spots: Array<{ text: string; value: number; rx: number; ry: number }>) => callback(spots))
+  },
+  spotPlace: (payload: { droidId: string; quality: string; station: string }) => ipcRenderer.invoke('spot-place', payload),
+  spotClose: () => ipcRenderer.send('spot-close'),
+  onSpotPlaceRequest: (callback: (req: { droidId: string; quality: string; station: string; reqId: number }) => void): Unsub => {
+    return sub('spot-place-request', (_, req: { droidId: string; quality: string; station: string; reqId: number }) => callback(req))
+  },
+  reportSpotPlaceDone: (res: { reqId: number; ok: boolean; message: string }) => ipcRenderer.send('spot-place-done', res),
   onSpotStatus: (callback: (status: string) => void): Unsub => {
     return sub('spot-status', (_, status: string) => callback(status))
   },

@@ -46,12 +46,6 @@ interface AppState {
   suggestions: SlotSuggestion[]
   spots: Array<{ text: string; value: number; rx: number; ry: number }>
   setSpots: (spots: AppState['spots']) => void
-  // Post-spot match popup (F9 result): confirm card, pick station + slot.
-  spotMatchOpen: boolean
-  setSpotMatchOpen: (v: boolean) => void
-  // Step 2 payload: droid confirmed in step 1, awaiting station + slot.
-  spotPlace: { droidId: string; quality: Quality } | null
-  setSpotPlace: (v: { droidId: string; quality: Quality } | null) => void
   toast: { msg: string; at: number } | null
   showToast: (msg: string) => void
   rebirthProgress: Record<string, number>
@@ -131,14 +125,6 @@ export const useStore = create<AppState>()(
       spots: [],
 
       setSpots: (spots) => set({ spots }),
-
-      spotMatchOpen: false,
-
-      setSpotMatchOpen: (v) => set({ spotMatchOpen: v }),
-
-      spotPlace: null,
-
-      setSpotPlace: (v) => set({ spotPlace: v }),
 
       rebirthProgress: {},
 

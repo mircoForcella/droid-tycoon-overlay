@@ -6,26 +6,14 @@ import { Timers } from './components/Timers'
 import { Settings } from './components/Settings'
 import { RebirthTab } from './components/RebirthTab'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { SpotMatchModal, SpotPlaceModal } from './components/SpotMatchModal'
 import { findByIncome } from './data/income'
-import { formatCredits, getSellValue } from './data/droidValues'
+import { formatCredits, getDroidDef, getSellValue, type Quality } from './data/droidValues'
+import { ALL_SLOTS } from './data/droids'
 
 function Toast() {
   const toast = useStore(s => s.toast)
   if (!toast) return null
   return <div className="toast">{toast.msg}</div>
-}
-
-function SpotMatch() {
-  const matchOpen = useStore(s => s.spotMatchOpen)
-  const place = useStore(s => s.spotPlace)
-  if (!matchOpen && !place) return null
-  return (
-    <ErrorBoundary name="SpotMatch">
-      {matchOpen && <SpotMatchModal />}
-      {place && <SpotPlaceModal />}
-    </ErrorBoundary>
-  )
 }
 
 function App() {
@@ -109,7 +97,6 @@ function App() {
       unsubs.push(api.onIncomeSpots((spots) => {
         const st = useStore.getState()
         st.setSpots(spots)
-        st.setSpotMatchOpen(false)
         // Instant path: a station picker is already open (armed) and the read
         // matches exactly one droid → place it immediately, no more taps.
         // F9 UX is "aim at the droid": try the crosshair-closest spot first.
@@ -132,11 +119,11 @@ function App() {
             }
           }
         }
-        // Match popup: any spot with table hits → centered window to confirm
-        // the card (or pick one) and choose station + slot. No area filter:
-        // any droid can work any station, the user decides where it goes.
+        // Match popup: any spot with table hits → centered floating window
+        // (own window, never inside the panel). No area filter: any droid
+        // can work any station, the user decides where it goes.
         if (spots.some(sp => findByIncome(sp.value).length > 0)) {
-          st.setSpotMatchOpen(true)
+          api.openSpotWindow?.(spots)
           return
         }
         st.showToast(
@@ -146,6 +133,27 @@ function App() {
         )
       }))
       unsubs.push(api.onTimersDetachedChanged((v) => useStore.getState().applyTimersDetached(v)))
+      // Spot window placement: first free slot of the chosen station.
+      // Runs here (panel process owns placements); the floating window only
+      // collects droid + station and reports the result back through main.
+      unsubs.push(api.onSpotPlaceRequest((req) => {
+        const st = useStore.getState()
+        const quality = req.quality as Quality
+        try {
+          const taken = new Set(st.placedDroids.map(p => p.slotId))
+          const slot = ALL_SLOTS.find(s => s.category === req.station && !taken.has(s.id))
+          if (!slot) {
+            api.reportSpotPlaceDone({ reqId: req.reqId, ok: false, message: 'Station full — free a slot first.' })
+            return
+          }
+          st.placeDroid(slot.id, req.droidId, quality)
+          const def = getDroidDef(req.droidId)
+          st.showToast(def ? `✅ Placed ${def.name} (${quality}) — ${formatCredits(getSellValue(def, quality))}` : '✅ Placed')
+          api.reportSpotPlaceDone({ reqId: req.reqId, ok: true, message: 'placed' })
+        } catch (e) {
+          api.reportSpotPlaceDone({ reqId: req.reqId, ok: false, message: String((e as Error)?.message ?? e) })
+        }
+      }))
     }
     // Ctrl+Z undo (overlay-scoped: only fires when the panel itself has focus,
     // so game keys are untouched; native text-field undo wins inside inputs).
@@ -241,7 +249,6 @@ function App() {
         </ErrorBoundary>
       </div>
       <Toast />
-      <SpotMatch />
 
     </div>
   )
