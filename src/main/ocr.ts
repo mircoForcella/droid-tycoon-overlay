@@ -189,16 +189,12 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   }
   const crops = await captureAllCenterCrops()
   // Game window first: screenshots ONLY Fortnite (no monitor guessing).
-  // Its frame is saved separately (spot-gamewin.png) so it can never be
-  // confused with a fallback screen crop.
+  // This block is proven correct; do not touch it.
   try {
     const { crop: win, candidates } = await captureFortniteWindowCrop()
     dbg(`windows seen: ${candidates.slice(0, 12).join(' | ').slice(0, 300)}`)
     if (win) {
       dbg(`game-window crop ${win.frameW}x${win.frameH}`)
-      try {
-        await fs.writeFile(join(capDir, 'spot-gamewin.png'), win.png)
-      } catch {}
       crops.unshift(win)
     } else {
       dbg('game window not found, using display crops')
@@ -206,20 +202,22 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   } catch (e) {
     dbg(`game-window capture failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
   }
-  if (crops.length === 0) return { spots: [], meta: { frameW: 0, frameH: 0, lines: 0, sample: 'no-frame', pass: 'none' } }
-  // Screens are fallback only (window minimized/renamed): explicit choice
-  // first, then primary display, then the rest brightest-first.
-  // (Brightest-first alone kept reading the user's second monitor.)
-  const preferred = displayId ?? crops.find(c => c.primary && c.displayId !== -1)?.displayId ?? null
-  const ordered = [...crops].sort((a, b) =>
-    ((b.displayId === preferred) ? 1 : 0) - ((a.displayId === preferred) ? 1 : 0) ||
-    Number(b.primary) - Number(a.primary) ||
-    b.brightness - a.brightness
-  )
-  // The game window always wins, even over an explicit monitor choice —
-  // it IS the game; a saved display pick may be stale.
-  const wini = ordered.findIndex(c => c.displayId === -1)
-  if (wini > 0) ordered.unshift(...ordered.splice(wini, 1))
+  // ONE capture per F9: the game window if found (unshifted to front above),
+  // else a single display crop (explicit choice, then primary, then
+  // brightest). No monitor loop — reading every screen was slow and sprayed
+  // confusing debug files. The game-window block above is proven correct;
+  // do not touch it.
+  let attempt = crops.find(c => c.displayId === -1) ?? null
+  if (!attempt && crops.length > 0) {
+    const preferred = displayId ?? crops.find(c => c.primary)?.displayId ?? null
+    attempt = [...crops].sort((a, b) =>
+      ((b.displayId === preferred) ? 1 : 0) - ((a.displayId === preferred) ? 1 : 0) ||
+      Number(b.primary) - Number(a.primary) ||
+      b.brightness - a.brightness
+    )[0]
+  }
+  if (!attempt) return { spots: [], meta: { frameW: 0, frameH: 0, lines: 0, sample: 'no-frame', pass: 'none' } }
+  const crop = attempt
 
   // Page shape: blocks[] -> paragraphs[] -> lines[] (there is NO top-level `lines`).
   const linesOf = (data: unknown, size: { width: number; height: number }): OcrLine[] => {
@@ -245,10 +243,10 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     return out
   }
 
-  // Try each crop in order (game window, then displays); each gets both
-  // engine passes on RAW pixels; first crop with spots wins.
-  // spot-raw.png always holds the crop that produced the result (or the
-  // last one tried), so a wrong-monitor read is diagnosable from disk.
+  // ONE frame, both engine passes on RAW pixels. Single debug file:
+  // spot.png is always the exact frame that was read. Legacy spot-raw.png
+  // / spot-cooked.png from the multi-crop era are deleted so the folder
+  // never shows stale frames again.
   const t0 = Date.now()
 
   let lines: OcrLine[] = []
@@ -257,17 +255,19 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   let pass = 'ppocr'
   let size = { width: 0, height: 0 }
 
-  // Try each monitor's crop in order; first crop with spots wins.
-  // spot-raw.png always holds the crop that produced the result (or the
-  // last one tried), so a wrong-monitor read is diagnosable from disk.
-  for (const [ci, crop] of ordered.entries()) {
+  {
     const thumb = nativeImage.createFromBuffer(crop.png)
     size = thumb.getSize()
     const raw = thumb.toBitmap()
+    for (const stale of ['spot-raw.png', 'spot-cooked.png', 'spot-gamewin.png']) {
+      try {
+        await fs.unlink(join(capDir, stale))
+      } catch {}
+    }
     try {
-      await fs.writeFile(join(capDir, 'spot-raw.png'), crop.png)
+      await fs.writeFile(join(capDir, 'spot.png'), crop.png)
     } catch {}
-    dbg(`try crop ${ci + 1}/${ordered.length} display=${crop.displayId === -1 ? 'game-window' : crop.displayId}${crop.primary && crop.displayId !== -1 ? ' (primary)' : ''} crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
+    dbg(`read display=${crop.displayId === -1 ? 'game-window' : crop.displayId} crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
 
     // Shared frame geometry for both passes.
     const frame = {
@@ -299,14 +299,11 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
 
     if (spots.length === 0) {
       // Pass 2 (fallback): Tesseract on the RAW upscaled crop — it does its
-      // own adaptive thresholding internally. No binarized "cooked" image:
-      // hard thresholds destroyed washed-out live thumbnails (blank page).
+      // own adaptive thresholding internally. No second debug file: spot.png
+      // above is already the exact frame being read.
       // Worker spins up lazily here so PP-OCR hits never pay for it.
     const worker = await getWorker()
     const cooked = upscaleRaw(raw, size.width, size.height)
-      try {
-        await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
-      } catch {}
       // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
       // fully-automatic segmentation, and a tight whitelist stops the engine
       // wasting effort on pipes/sky glyphs.
@@ -327,7 +324,6 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       pass = 'center-crop'
       spots = extractSpots(lines, { ...frame, upscale })
     }
-    if (spots.length > 0) break
   }
   dbg(`done in=${Date.now() - t0}ms pass=${pass} lines=${lines.length} spots=${spots.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
 
