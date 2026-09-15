@@ -174,23 +174,46 @@ export interface SpotResult {
 }
 
 export async function spotIncomes(displayId: number | null = null): Promise<SpotResult> {
-  const { captureAllCenterCrops } = await import('./capture')
+  const { captureAllCenterCrops, captureFortniteWindowCrop } = await import('./capture')
   const fs = await import('fs/promises')
   const capDir = join(app.getPath('userData'), 'captures')
   try {
     await fs.mkdir(capDir, { recursive: true })
   } catch {}
+  const { appendFileSync } = await import('fs')
+  const dbg = (m: string) => {
+    try {
+      appendFileSync(join(app.getPath('userData'), 'app.log'), `[${new Date().toISOString()}] [ocr-spot] ${m}\n`)
+    } catch {}
+  }
   const crops = await captureAllCenterCrops()
+  // Game window first: screenshots ONLY Fortnite (no monitor guessing).
+  // displayId -1 + primary + max brightness sorts it to the front below.
+  try {
+    const win = await captureFortniteWindowCrop()
+    if (win) {
+      dbg(`game-window crop ${win.frameW}x${win.frameH}`)
+      crops.unshift(win)
+    } else {
+      dbg('game window not found, using display crops')
+    }
+  } catch (e) {
+    dbg(`game-window capture failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
+  }
   if (crops.length === 0) return { spots: [], meta: { frameW: 0, frameH: 0, lines: 0, sample: 'no-frame', pass: 'none' } }
-  // F9 reads the game monitor, not the brightest one: explicit choice first,
-  // then primary display, then the rest brightest-first as fallback.
+  // Screens are fallback only (window minimized/renamed): explicit choice
+  // first, then primary display, then the rest brightest-first.
   // (Brightest-first alone kept reading the user's second monitor.)
-  const preferred = displayId ?? crops.find(c => c.primary)?.displayId ?? null
+  const preferred = displayId ?? crops.find(c => c.primary && c.displayId !== -1)?.displayId ?? null
   const ordered = [...crops].sort((a, b) =>
     ((b.displayId === preferred) ? 1 : 0) - ((a.displayId === preferred) ? 1 : 0) ||
     Number(b.primary) - Number(a.primary) ||
     b.brightness - a.brightness
   )
+  // The game window always wins, even over an explicit monitor choice —
+  // it IS the game; a saved display pick may be stale.
+  const wini = ordered.findIndex(c => c.displayId === -1)
+  if (wini > 0) ordered.unshift(...ordered.splice(wini, 1))
 
   // Page shape: blocks[] -> paragraphs[] -> lines[] (there is NO top-level `lines`).
   const linesOf = (data: unknown, size: { width: number; height: number }): OcrLine[] => {
@@ -217,12 +240,6 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   }
 
   // Single fast pass: binarized + 3x upscaled center crop.
-  const { appendFileSync } = await import('fs')
-  const dbg = (m: string) => {
-    try {
-      appendFileSync(join(app.getPath('userData'), 'app.log'), `[${new Date().toISOString()}] [ocr-spot] ${m}\n`)
-    } catch {}
-  }
   const t0 = Date.now()
 
   let lines: OcrLine[] = []
@@ -241,7 +258,7 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     try {
       await fs.writeFile(join(capDir, 'spot-raw.png'), crop.png)
     } catch {}
-    dbg(`try crop ${ci + 1}/${ordered.length} display=${crop.displayId}${crop.primary ? ' (primary)' : ''} crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
+    dbg(`try crop ${ci + 1}/${ordered.length} display=${crop.displayId === -1 ? 'game-window' : crop.displayId}${crop.primary && crop.displayId !== -1 ? ' (primary)' : ''} crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
 
     // Shared frame geometry for both passes.
     const frame = {

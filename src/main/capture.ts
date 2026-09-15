@@ -123,6 +123,53 @@ export async function captureAllCenterCrops(
   return crops.sort((a, b) => Number(b.primary) - Number(a.primary) || b.brightness - a.brightness)
 }
 
+// Game-window crop for F9: screenshots ONLY the Fortnite window instead of
+// every monitor. No brightest-monitor guessing, no second-monitor reads,
+// no display pairing involved. Largest non-blank match wins (main game
+// window, not launcher bits). Coordinates are window-relative, so the
+// crosshair is always at (0.5, 0.5). Null when not found — callers fall
+// back to the per-display crops.
+export async function captureFortniteWindowCrop(
+  cropW = 900,
+  cropH = 600,
+  windowTitle = 'Fortnite'
+): Promise<DisplayCrop | null> {
+  const wins = await desktopCapturer.getSources({
+    types: ['window'],
+    thumbnailSize: { width: 2560, height: 1440 }
+  })
+  const candidates = wins.filter(
+    s => s.name.includes(windowTitle) && !s.name.includes('Droid') && !s.thumbnail.isEmpty()
+  )
+  candidates.sort((a, b) => {
+    const sa = a.thumbnail.getSize()
+    const sb = b.thumbnail.getSize()
+    return sb.width * sb.height - sa.width * sa.height
+  })
+  for (const win of candidates) {
+    if (isBlank(win.thumbnail)) continue
+    const size = win.thumbnail.getSize()
+    const x = Math.max(0, Math.round((size.width - cropW) / 2))
+    const y = Math.max(0, Math.round((size.height - cropH) / 2))
+    const w = Math.max(1, Math.min(cropW, size.width - x))
+    const h = Math.max(1, Math.min(cropH, size.height - y))
+    const cropped = win.thumbnail.crop({ x, y, width: w, height: h })
+    if (cropped.isEmpty() || isBlank(cropped)) continue
+    return {
+      png: cropped.toPNG(),
+      displayId: -1, // sentinel: game window, not a display
+      frameW: size.width,
+      frameH: size.height,
+      originX: 0,
+      originY: 0,
+      scale: 1,
+      primary: true,
+      brightness: Number.MAX_SAFE_INTEGER
+    }
+  }
+  return null
+}
+
 // Blank-frame guard: some captures (minimized/occluded/exclusive-fullscreen
 // windows) come back all-black. Sample pixels; avg brightness < 8 = blank.
 function isBlank(img: Electron.NativeImage): boolean {
