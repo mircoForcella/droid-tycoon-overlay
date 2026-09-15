@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { getSlotsByCategory, BaseSlot } from '../data/droids'
 import { DROIDS, DroidDef, Quality, QUALITIES, getSellValue, formatCredits, getDroidDef } from '../data/droidValues'
 import { getIncome, formatIncome, parseIncome, findByIncome } from '../data/income'
+import { PaintTag, TierTag } from './RarityTags'
 
 export function LiveScanBar() {
   const { liveScan, scanIntervalMs } = useStore()
@@ -185,7 +186,11 @@ export function DroidPickerModal({ isOpen, onClose, onSelect, category }: {
             >
               <div className="droid-option-icon">{d.icon}</div>
               <div className="droid-option-name">{d.name}</div>
-              <div className="droid-option-value" style={{ color: 'var(--text-dim)' }}>{d.tier} {q}{d.fusion ? ' • fusion' : ''}</div>
+              <div className="droid-option-value" style={{ display: 'flex', gap: 4, justifyContent: 'center', alignItems: 'center' }}>
+                <TierTag tier={d.tier} />
+                <PaintTag quality={q} />
+                {d.fusion && <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>• fusion</span>}
+              </div>
               <div className="droid-option-value">💰 {formatIncome(income)}</div>
               <div className="droid-option-value">{formatCredits(getSellValue(d, q))}</div>
             </button>

@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { REBIRTH_PATHS, RebirthPath } from '../data/rebirths'
 import { getDroidDef, getSellValue, formatCredits } from '../data/droidValues'
 import { getDroidCard } from '../data/droidCards'
+import { PaintTag, TierTag } from './RarityTags'
 
 // Sell safety is derived from the data: a requirement is "needed later" if the
 // same droid appears in any later rebirth of the same path.
@@ -118,7 +119,8 @@ export function RebirthTab() {
                     <span style={{ fontSize: 18, width: 44, textAlign: 'center' }}>{def.icon}</span>
                   )}
                   <span style={{ flex: 1 }}>
-                    <strong style={{ color: 'var(--gold)' }}>P{pd.path} · RB {step.n}</strong> — {def.name} <span style={{ color: 'var(--text-dim)' }}>{def.tier} {req.quality}</span>
+                    <strong style={{ color: 'var(--gold)' }}>P{pd.path} · RB {step.n}</strong> — {def.name}{' '}
+                    <TierTag tier={def.tier} /> <PaintTag quality={req.quality} />
                     <br />
                     <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
                       Cost {formatCredits(step.cost)} • Sell {formatCredits(getSellValue(def, req.quality))}
@@ -175,7 +177,7 @@ export function RebirthTab() {
                   <div className="rebirth-card-body">
                     <div className="rebirth-card-name">{def.name}</div>
                     <div>
-                      <div className="rebirth-card-sub">{def.tier} {r.quality}</div>
+                      <div><TierTag tier={def.tier} /> <PaintTag quality={r.quality} /></div>
                       <div className="rebirth-card-sell">{formatCredits(sell)}</div>
                       <div className={`rebirth-card-flag ${needed ? 'keep' : 'sell'}`}>
                         {needed ? `KEEP — RB ${later.join(', ')}` : 'SELL ✔'}

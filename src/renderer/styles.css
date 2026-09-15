@@ -307,6 +307,40 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
 .spot-card .rebirth-card-sell { font-size: 12px; }
 .spot-card.spot-pick { outline: 3px solid var(--gold); outline-offset: -1px; }
 
+/* Game-accurate paint + rarity styling (from in-game reference shots).
+   Paints are text colors; rarities are pills with dark text — exactly like
+   the game renders them. NOTE: paint GOLD (#E5A100, darker) and paint
+   STELLAR (#FFE14D, light yellow, not cream) are deliberately distinct
+   from each other and from the --gold UI chrome (#ffc832). */
+.paint { font-weight: 800; font-style: italic; letter-spacing: 0.4px; }
+.paint-default { color: #ffffff; }
+.paint-gold { color: #e5a100; }
+.paint-diamond { color: #33d7e8; }
+.paint-rainbow {
+  background: linear-gradient(90deg, #ff3b30 0%, #ff8c00 20%, #ffd400 38%, #35d05a 55%, #2fb9ec 72%, #9b5cff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.paint-beskar { color: #9ba1a6; }
+.paint-galactic { color: #b45cff; }
+.paint-stellar { color: #ffe14d; }
+.tier {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.4px;
+  color: #111;
+}
+.tier-common { background: #d9d9d9; }
+.tier-rare { background: #7fd0f0; }
+.tier-epic { background: #671fae; }
+.tier-legendary { background: #f5820b; }
+.tier-mythic { background: #f0227e; }
+.tier-iconic { background: #f2e5a0; }
+
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; width: 90%; max-width: 400px; max-height: 80vh; overflow-y: auto; }
 .modal-title { color: var(--gold); font-size: 14px; font-weight: 700; margin-bottom: 16px; text-align: center; }

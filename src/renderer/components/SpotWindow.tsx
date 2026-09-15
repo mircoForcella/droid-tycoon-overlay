@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { findByIncome, formatIncome } from '../data/income'
 import { formatCredits, getSellValue } from '../data/droidValues'
 import { getDroidCard } from '../data/droidCards'
+import { PaintTag, TierTag } from './RarityTags'
 
 interface Spot {
   text: string
@@ -119,7 +120,11 @@ export function SpotWindow() {
                       <div className="rebirth-card-body">
                         <div className="rebirth-card-name">{h.def.name}</div>
                         <div>
-                          <div className="rebirth-card-sub">{h.def.tier} {h.quality}{h.def.fusion ? ' • fusion' : ''}</div>
+                          <div style={{ display: 'flex', gap: 4, justifyContent: 'center', alignItems: 'center', marginBottom: 3 }}>
+                            <TierTag tier={h.def.tier} />
+                            <PaintTag quality={h.quality} />
+                          </div>
+                          {h.def.fusion && <div className="rebirth-card-sub">• fusion</div>}
                           <div className="rebirth-card-sub">💰 {formatIncome(h.income)}</div>
                           <div className="rebirth-card-sell">{formatCredits(getSellValue(h.def, h.quality))}</div>
                         </div>
