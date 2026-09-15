@@ -189,11 +189,16 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   }
   const crops = await captureAllCenterCrops()
   // Game window first: screenshots ONLY Fortnite (no monitor guessing).
-  // displayId -1 + primary + max brightness sorts it to the front below.
+  // Its frame is saved separately (spot-gamewin.png) so it can never be
+  // confused with a fallback screen crop.
   try {
-    const win = await captureFortniteWindowCrop()
+    const { crop: win, candidates } = await captureFortniteWindowCrop()
+    dbg(`windows seen: ${candidates.slice(0, 12).join(' | ').slice(0, 300)}`)
     if (win) {
       dbg(`game-window crop ${win.frameW}x${win.frameH}`)
+      try {
+        await fs.writeFile(join(capDir, 'spot-gamewin.png'), win.png)
+      } catch {}
       crops.unshift(win)
     } else {
       dbg('game window not found, using display crops')

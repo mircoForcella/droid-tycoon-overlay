@@ -128,25 +128,35 @@ export async function captureAllCenterCrops(
 // no display pairing involved. Largest non-blank match wins (main game
 // window, not launcher bits). Coordinates are window-relative, so the
 // crosshair is always at (0.5, 0.5). Null when not found — callers fall
-// back to the per-display crops.
+// back to the per-display crops. `candidates` names every window title
+// seen, so a missed match is diagnosable from the log.
+export interface FortniteWindowAttempt {
+  crop: DisplayCrop | null
+  candidates: string[] // every window title seen, for log diagnosis
+}
+
 export async function captureFortniteWindowCrop(
   cropW = 900,
   cropH = 600,
   windowTitle = 'Fortnite'
-): Promise<DisplayCrop | null> {
+): Promise<FortniteWindowAttempt> {
   const wins = await desktopCapturer.getSources({
     types: ['window'],
     thumbnailSize: { width: 2560, height: 1440 }
   })
-  const candidates = wins.filter(
+  const candidates = wins.map(s => {
+    const size = s.thumbnail.getSize()
+    return `${s.name || '(untitled)'} ${size.width}x${size.height}${s.thumbnail.isEmpty() ? ' EMPTY' : ''}`
+  })
+  const matches = wins.filter(
     s => s.name.includes(windowTitle) && !s.name.includes('Droid') && !s.thumbnail.isEmpty()
   )
-  candidates.sort((a, b) => {
+  matches.sort((a, b) => {
     const sa = a.thumbnail.getSize()
     const sb = b.thumbnail.getSize()
     return sb.width * sb.height - sa.width * sa.height
   })
-  for (const win of candidates) {
+  for (const win of matches) {
     if (isBlank(win.thumbnail)) continue
     const size = win.thumbnail.getSize()
     const x = Math.max(0, Math.round((size.width - cropW) / 2))
@@ -156,18 +166,21 @@ export async function captureFortniteWindowCrop(
     const cropped = win.thumbnail.crop({ x, y, width: w, height: h })
     if (cropped.isEmpty() || isBlank(cropped)) continue
     return {
-      png: cropped.toPNG(),
-      displayId: -1, // sentinel: game window, not a display
-      frameW: size.width,
-      frameH: size.height,
-      originX: x,
-      originY: y,
-      scale: 1,
-      primary: true,
-      brightness: Number.MAX_SAFE_INTEGER
+      crop: {
+        png: cropped.toPNG(),
+        displayId: -1, // sentinel: game window, not a display
+        frameW: size.width,
+        frameH: size.height,
+        originX: x,
+        originY: y,
+        scale: 1,
+        primary: true,
+        brightness: Number.MAX_SAFE_INTEGER
+      },
+      candidates
     }
   }
-  return null
+  return { crop: null, candidates }
 }
 
 // Blank-frame guard: some captures (minimized/occluded/exclusive-fullscreen
