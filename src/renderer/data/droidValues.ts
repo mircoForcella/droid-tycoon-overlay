@@ -27,8 +27,8 @@ export interface DroidDef {
   base: number // Default-quality sell value in credits
   fusion?: boolean
   noStellar?: boolean
-  // legacy base-area category for the 31-slot map
-  area: 'workers' | 'astromechs' | 'battle' | 'special'
+  // legacy base-area category for the 31-slot map ('protocol' has no map slots yet)
+  area: 'workers' | 'astromechs' | 'battle' | 'special' | 'protocol'
   icon: string
 }
 
@@ -52,28 +52,30 @@ export const DROIDS: DroidDef[] = [
   C('r3', 'R3', 1400, 'astromechs', '⚪'),
   C('r5', 'R5', 1400, 'astromechs', '🔴'),
   C('r8', 'R8', 2100, 'astromechs', '⚪'),
-  C('imp-probe', 'Imperial Probe', 3500, 'workers', '👁️'),
+  C('imp-probe', 'Imperial Probe', 3500, 'battle', '👁️'),
   C('b1-battle', 'B1 Battle', 2800, 'battle', '🤖'),
-  C('drk1-probe', 'DRK-1 Probe', 2100, 'workers', '🔍'),
-  C('id10', 'ID10', 2800, 'workers', '🛸'),
+  C('drk1-probe', 'DRK-1 Probe', 2100, 'battle', '🔍'),
+  C('id10', 'ID10', 2800, 'battle', '🛸'),
   // ---- Rare ----
   R('bdx-explorer', 'BDX Explorer', 17500, 'workers', '🧭'),
   R('arg', 'ARG', 61600, 'workers', '🏗️'),
   R('senate-hovercam', 'Senate Hovercam', 70000, 'workers', '📷'),
   R('b-u4d', 'B-U4D', 91000, 'workers', '🤖'),
-  R('bal-core', 'BAL-Core', 30100, 'astromechs', '🔵'),
-  R('roll-r', 'ROLL-R', 43400, 'astromechs', '⚪'),
+  R('bal-core', 'BAL-Core', 30100, 'workers', '🔵'),
+  R('roll-r', 'ROLL-R', 43400, 'workers', '⚪'),
   R('whl-ex', 'WHL-EX', 227500, 'workers', '⚙️', true),
   R('2bb', '2BB', 21000, 'astromechs', '💗'),
   R('a-lt', 'A-LT', 51800, 'astromechs', '⚪'),
   R('r4', 'R4', 77000, 'astromechs', '🔴'),
   R('r9', 'R9', 84000, 'astromechs', '🟡'),
-  R('zro-tec', 'ZRO-TEC', 227500, 'workers', '⚙️', true),
+  R('zro-tec', 'ZRO-TEC', 227500, 'astromechs', '⚙️', true),
   R('b1-security', 'B1 Security', 105000, 'battle', '🛡️'),
-  R('nav-ex', 'NAV-EX', 25200, 'astromechs', '🧭'),
-  R('vect-arm', 'Vect-Arm', 36400, 'workers', '🦾'),
-  R('hov-r', 'HOV-R', 98000, 'workers', '🛸'),
+  R('nav-ex', 'NAV-EX', 25200, 'battle', '🧭'),
+  R('vect-arm', 'Vect-Arm', 36400, 'battle', '🦾'),
+  R('hov-r', 'HOV-R', 98000, 'battle', '🛸'),
   R('btl-r', 'BTL-R', 227500, 'battle', '⚙️', true),
+  // Protocol (base sell + income TBD — roster confirmed by sheet)
+  R('sa-5', 'SA-5', 0, 'protocol', '📡'),
   // ---- Epic ----
   E('groundmech', 'Groundmech', 630000, 'workers', '🚜'),
   E('l0', 'L0', 1470000, 'workers', '🤖'),
@@ -87,16 +89,18 @@ export const DROIDS: DroidDef[] = [
   E('r6', 'R6', 1890000, 'astromechs', '🟢'),
   E('trak-r', 'Trak-R', 2100000, 'astromechs', '🟠'),
   E('orb-walker', 'Orb-Walker', 1050000, 'astromechs', '🔮'),
-  E('util-tec', 'Util-Tec', 1260000, 'workers', '🔧'),
-  E('scrp-r', 'SCRP-R', 9520000, 'workers', '⚙️', true),
+  E('util-tec', 'Util-Tec', 1260000, 'astromechs', '🔧'),
+  E('scrp-r', 'SCRP-R', 9520000, 'astromechs', '⚙️', true),
   E('b1-heavy', 'B1 Heavy', 4200000, 'battle', '🤖'),
   E('b2-super', 'B2 Super', 2730000, 'battle', '🤖'),
   E('b2-heavy', 'B2 Heavy', 3150000, 'battle', '🤖'),
   E('strike-orb', 'Strike-Orb', 3570000, 'battle', '🔮'),
-  E('haul-r', 'Haul-R', 1680000, 'workers', '🚚'),
+  E('haul-r', 'Haul-R', 1680000, 'battle', '🚚'),
   E('lng-shot', 'LNG-Shot', 2940000, 'battle', '🔫'),
-  E('arm-core', 'ARM-Core', 9200000, 'workers', '⚙️', true),
-  E('opt-ar', 'OPT-AR', 9520000, 'workers', '⚙️', true),
+  E('arm-core', 'ARM-Core', 9200000, 'battle', '⚙️', true),
+  E('opt-ar', 'OPT-AR', 9520000, 'battle', '⚙️', true),
+  // Protocol (base sell + income TBD — roster confirmed by sheet)
+  E('lom', 'LOM', 0, 'protocol', '🦾'),
   // ---- Legendary ----
   L('proto-roller', 'Proto-Roller', 15400000, 'workers', '🛞'),
   L('mecha-droid', 'Mecha-Droid', 20300000, 'workers', '🤖'),
@@ -110,24 +114,28 @@ export const DROIDS: DroidDef[] = [
   L('cyclo-grav', 'Cyclo-Grav', 21000000, 'battle', '🌀'),
   L('opti-strk', 'Opti-STRK', 25900000, 'battle', '🎯'),
   L('orb-xl', 'ORB-XL', 56000000, 'battle', '⚙️', true),
+  // Protocol (base sell + income TBD — roster confirmed by sheet)
+  L('pz', 'PZ', 0, 'protocol', '🌀'),
   // ---- Mythic ----
   M('snow-mouse', 'Snow Mouse', 126000000, 'workers', '🐭'),
   M('ric', 'RIC', 142800000, 'workers', '🤖'),
   M('loadlifter', 'Loadlifter', 210000000, 'workers', '🏗️'),
   M('lep', 'LEP', 176400000, 'workers', '🐰'),
-  M('ric-1200', 'RIC-1200', 159600000, 'astromechs', '🔵'),
-  M('riv-3t', 'RIV-3T', 252000000, 'astromechs', '⚙️', true),
-  M('lug-g', 'LUG-G', 224000000, 'astromechs', '⚙️', true),
-  M('low-mo', 'LOW-MO', 238000000, 'astromechs', '⚙️', true, true),
-  M('drft-r', 'DRFT-R', 159600000, 'battle', '🏎️'),
-  M('cyclens', 'Cyclens', 126000000, 'battle', '🌀'),
-  M('mo-trak', 'MO-Trak', 210000000, 'battle', '🚚'),
-  M('tri-tek', 'Tri-Tek', 176400000, 'battle', '🔱'),
-  M('axi-pod', 'AXI-POD', 252000000, 'battle', '⚙️', true),
+  M('ric-1200', 'RIC-1200', 159600000, 'workers', '🔵'),
+  M('riv-3t', 'RIV-3T', 252000000, 'workers', '⚙️', true),
+  M('lug-g', 'LUG-G', 224000000, 'workers', '⚙️', true),
+  M('low-mo', 'LOW-MO', 238000000, 'workers', '⚙️', true, true),
+  M('drft-r', 'DRFT-R', 159600000, 'astromechs', '🏎️'),
+  M('cyclens', 'Cyclens', 126000000, 'astromechs', '🌀'),
+  M('mo-trak', 'MO-Trak', 210000000, 'astromechs', '🚚'),
+  M('tri-tek', 'Tri-Tek', 176400000, 'astromechs', '🔱'),
+  M('axi-pod', 'AXI-POD', 252000000, 'astromechs', '⚙️', true),
   M('ig', 'IG', 159600000, 'battle', '🤖'),
   M('kx', 'KX', 210000000, 'battle', '🛡️'),
   M('srv-o', 'SRV-O', 224000000, 'battle', '⚙️', true),
   M('x-onk', 'X-ONK', 252000000, 'battle', '⚙️', true),
+  // Protocol (base sell + income TBD — roster confirmed by sheet)
+  M('tda', 'TDA', 0, 'protocol', '🔭'),
   // ---- Iconic (no credit sell value, global buffs) ----
   ...[
     ['c3po', 'C-3PO', '2x Droid Sell Value'],
