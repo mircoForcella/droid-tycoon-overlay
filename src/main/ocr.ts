@@ -1,6 +1,6 @@
 // Offline OCR income spotter (tesseract.js, eng only).
 // Tuned for Fortnite's chunky outlined display font:
-//   1. teal-chroma isolate -> black-on-white -> 2x upscale (pure JS, no new runtime deps)
+//   1. teal-chroma isolate -> black-on-white -> 3x upscale (pure JS, no new runtime deps)
 //   2. single pass with PSM SINGLE_BLOCK + rate-token whitelist
 //   3. strict `/s` match (K/M/B/T) plus a fallback for common glyph confusions (/ -> l, s -> 5)
 //      gated on an /s marker so accumulations like "15.50B" never become spots.
@@ -64,9 +64,12 @@ async function getWorker(): Promise<Worker> {
 // shot1.png) over dark pipes / bright sky. Luminance-only Otsu keeps the sky
 // and fragments the thin outlined glyphs, so Tesseract sees nothing.
 // Filter by chroma instead: black-on-white where the pixel is teal-ish,
-// then 2x nearest-neighbor upscale (pure JS, no new runtime deps).
+// then 3x nearest-neighbor upscale (pure JS, no new runtime deps).
+// 3x, not 2x: at 2x Tesseract drops leading digits ("92.80K/s" -> "2.80K/s"
+// on shot2.png); at 3x both test frames read correctly. ~2x the pixels,
+// still well under a second for on-demand F9.
 function binarizeUpscale(src: Buffer, w: number, h: number): Buffer {
-  const scale = 2
+  const scale = 3
   const W = w * scale
   const H = h * scale
   const png = new PNG({ width: W, height: H })
@@ -202,8 +205,8 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     }
     // Fallback: raw text without layout (positions span the crop).
     if (out.length === 0 && d.text && d.text.trim().length > 0) {
-      const W = size.width * 2
-      const H = size.height * 2
+      const W = size.width * 3
+      const H = size.height * 3
       for (const t of d.text.split('\n')) {
         if (t.trim().length === 0) continue
         out.push({ text: t, bbox: { x0: 0, y0: 0, x1: W, y1: H } })
@@ -212,7 +215,7 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     return out
   }
 
-  // Single fast pass: binarized + 2x upscaled center crop.
+  // Single fast pass: binarized + 3x upscaled center crop.
   const { appendFileSync } = await import('fs')
   const dbg = (m: string) => {
     try {
@@ -249,7 +252,7 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     originX: crop.originX,
     originY: crop.originY,
     scale: crop.scale,
-    upscale: 2
+    upscale: 3
   })
   dbg(`done in=${Date.now() - t0}ms lines=${lines.length} spots=${spots.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
 

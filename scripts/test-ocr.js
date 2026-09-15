@@ -6,9 +6,9 @@ const { createWorker } = require('tesseract.js')
 
 // Teal-chroma isolate (see src/main/ocr.ts): income popups are bright teal
 // (~57,244,188) over dark pipes / bright sky. Luminance Otsu keeps the sky
-// and fragments glyphs; this keeps only teal as black-on-white, 2x upscale.
+// and fragments glyphs; this keeps only teal as black-on-white, 3x upscale.
 function binarizeUpscale(src, w, h) {
-  const scale = 2, W = w * scale, H = h * scale
+  const scale = 3, W = w * scale, H = h * scale
   const png = new PNG({ width: W, height: H })
   for (let y = 0; y < H; y++) {
     const sy = Math.min(h - 1, (y / scale) | 0)
@@ -103,7 +103,7 @@ function extractSpots(lines, frame) {
   const lines = []
   for (const b of (data.blocks || [])) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) lines.push(l)
   if (lines.length === 0 && (data.text || '').trim()) {
-    const W = cw * 2, H = ch * 2
+    const W = cw * 3, H = ch * 3
     for (const t of data.text.split('\n')) {
       if (t.trim().length === 0) continue
       lines.push({ text: t, bbox: { x0: 0, y0: 0, x1: W, y1: H } })
@@ -111,7 +111,7 @@ function extractSpots(lines, frame) {
   }
   console.log('lines=' + lines.length)
   lines.slice(0, 15).forEach((l, i) => console.log('L' + i + ': ' + JSON.stringify(l.text) + ' bbox=' + JSON.stringify(l.bbox)))
-  const spots = extractSpots(lines, { frameW: img.width, frameH: img.height, originX: cx, originY: cy, upscale: 2 })
+  const spots = extractSpots(lines, { frameW: img.width, frameH: img.height, originX: cx, originY: cy, upscale: 3 })
   console.log('SPOTS=' + JSON.stringify(spots))
   // Explain winner like App.tsx does (closest-first, first unique table match)
   spots.forEach((s, i) => {
