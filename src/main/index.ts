@@ -561,11 +561,12 @@ app.whenReady().then(async () => {
     toggleVisibility()
   })
   // F10 "type now": go interactive and focus whatever input is relevant.
-  // Press again to hand control back to the game.
+  // Press again to wipe the inputs and hand control back to the game.
   ipcMain.on('toggle-type-mode', () => {
     const toInteractive = isClickThrough
     setInteractive(toInteractive)
     if (toInteractive) broadcast('focus-input')
+    else broadcast('clear-inputs')
   })
 
   ipcMain.handle('get-displays', () => {

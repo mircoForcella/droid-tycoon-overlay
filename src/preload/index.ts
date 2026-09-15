@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onFocusInput: (callback: () => void): Unsub => {
     return sub('focus-input', () => callback())
   },
+  onClearInputs: (callback: () => void): Unsub => {
+    return sub('clear-inputs', () => callback())
+  },
   getDisplays: () => ipcRenderer.invoke('get-displays'),
   setOverlayDisplay: (value: 'all' | number) => ipcRenderer.send('set-overlay-display', value),
   setTimersDetached: (detached: boolean) => ipcRenderer.send('set-timers-detached', detached),

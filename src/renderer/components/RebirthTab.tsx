@@ -29,6 +29,11 @@ export function RebirthTab() {
     currentRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [path, progress])
 
+  useEffect(() => {
+    // Second F10 press (back to game) wipes whatever was typed.
+    return window.electronAPI?.onClearInputs?.(() => setQuery(''))
+  }, [])
+
   const q = query.trim().toLowerCase()
   const searchPaths = q.length > 0 ? (allPaths ? REBIRTH_PATHS : [data]) : []
   const searchHits = searchPaths.flatMap(pd =>
@@ -71,6 +76,7 @@ export function RebirthTab() {
         onChange={e => setQuery(e.target.value)}
         style={{ width: '100%', padding: 8, marginBottom: 4, borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.4)', color: 'var(--text)' }}
       />
+      <div className="hotkey-hint" style={{ marginBottom: 4 }}>F10 to type • F10 again clears + back to game</div>
       {q.length > 0 && (
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, cursor: 'pointer' }}>
           <input type="checkbox" checked={allPaths} onChange={e => setAllPaths(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />

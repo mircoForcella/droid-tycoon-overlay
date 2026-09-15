@@ -10,6 +10,7 @@ declare global {
       onToggleCollapse: (cb: () => void) => () => void
       toggleTypeMode: () => void
       onFocusInput: (cb: () => void) => () => void
+      onClearInputs: (cb: () => void) => () => void
       getDisplays: () => Promise<Array<{ id: number; label: string; primary: boolean }>> | undefined
       setOverlayDisplay: (value: 'all' | number) => void
       setTimersDetached: (detached: boolean) => void
