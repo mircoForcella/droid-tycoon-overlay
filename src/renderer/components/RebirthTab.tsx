@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { REBIRTH_PATHS } from '../data/rebirths'
-import { getDroidDef, getSellValue, formatCredits } from '../data/droidValues'
+import { DROIDS, getDroidDef, getSellValue, formatCredits } from '../data/droidValues'
 import { getDroidCard } from '../data/droidCards'
 import { PaintTag, TierTag } from './RarityTags'
 import type { DroidDef } from '../data/droidValues'
@@ -64,13 +64,11 @@ export function RebirthTab() {
     .map(g => ({ ...g, uses: g.uses.sort((a, b) => a.n - b.n) }))
     .sort((a, b) => a.def.name.localeCompare(b.def.name))
 
-  // Safe sellers: tier droids in this path with no requirement at or after
-  // progress. Paint is irrelevant, one row per droid, never Iconic.
+  // Safe sellers: every roster droid of the tier with no requirement at or
+  // after progress in this path — including droids the path never needs at
+  // all ("useless" ones). Paint is irrelevant, one row per droid, never Iconic.
   const sellList = isSellQuery
-    ? [...new Map(
-        data.steps.flatMap(s => s.requires.map(r => [r.droidId, getDroidDef(r.droidId)] as const))
-      ).values()]
-        .filter((def): def is DroidDef => !!def && def.tier !== 'Iconic')
+    ? DROIDS.filter(def => def.tier !== 'Iconic')
         .filter(def => sellTier === 'any' || def.tier.toLowerCase() === sellTier)
         .filter(def => !data.steps.some(s => s.n >= progress && s.requires.some(r => r.droidId === def.id)))
         .sort((a, b) => a.name.localeCompare(b.name))
