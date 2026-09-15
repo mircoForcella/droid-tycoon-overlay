@@ -9,7 +9,7 @@ export default defineConfig({
     electron([
       {
         entry: 'src/main/index.ts',
-        vite: { build: { outDir: 'dist/main', rollupOptions: { external: ['electron'] } } }
+        vite: { build: { outDir: 'dist/main', rollupOptions: { external: ['electron', 'onnxruntime-node'] } } }
       },
       {
         entry: 'src/preload/index.ts',

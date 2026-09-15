@@ -5,7 +5,7 @@
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node scripts/copy-ocr-assets.js",
+    "build": "tsc && vite build && node scripts/copy-ocr-assets.js && node scripts/fetch-ocr-models.js && node scripts/prune-ort.js",
     "copy-ocr": "node scripts/copy-ocr-assets.js",
     "preview": "vite preview",
     "start": "electron .",
@@ -16,6 +16,7 @@
   "dependencies": {
     "electron-store": "^8.1.0",
     "electron-updater": "^6.8.9",
+    "onnxruntime-node": "^1.30.0",
     "pngjs": "^7.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -52,10 +53,17 @@
       "dist/**/*",
       "build/**/*"
     ],
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/bin/napi-v6/win32/x64/**/*"
+    ],
     "extraResources": [
       {
         "from": "ocr-assets",
         "to": "ocr"
+      },
+      {
+        "from": "ocr-models",
+        "to": "ocr-models"
       }
     ],
     "directories": {

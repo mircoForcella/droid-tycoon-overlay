@@ -1,9 +1,12 @@
-// Offline OCR income spotter (tesseract.js, eng only).
+// Offline OCR income spotter (PP-OCRv5 + tesseract.js fallback, eng only).
 // Tuned for Fortnite's chunky outlined display font:
-//   1. teal-chroma isolate -> black-on-white -> 3x upscale (pure JS, no new runtime deps)
-//   2. single pass with PSM SINGLE_BLOCK + rate-token whitelist
-//   3. strict `/s` match (K/M/B/T) plus a fallback for common glyph confusions (/ -> l, s -> 5)
-//      gated on an /s marker so accumulations like "15.50B" never become spots.
+//   1. teal-chroma isolate -> connected-component line strips -> PP-OCRv5
+//      recognizer via onnxruntime-node (primary; exact on shot1/shot2)
+//   2. fallback: binarized + 3x upscale -> Tesseract PSM SINGLE_BLOCK +
+//      rate-token whitelist (only when pass 1 yields no lines)
+//   3. strict `/s` match (K/M/B/T) plus a fallback for common glyph confusions
+//      (/ -> l/1, s -> 5) gated on an end-of-line /s marker, so accumulations
+//      like "15.50B" never become spots.
 //   4. spots ranked by distance to screen center (crosshair) — closest first.
 // On-demand only. Never runs continuously.
 //
@@ -16,6 +19,7 @@ import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { createWorker, Worker } from 'tesseract.js'
 import { PNG } from 'pngjs'
+import { PPOCR_UPSCALE } from './ppocr'
 
 export interface IncomeSpot {
   text: string // raw matched text, e.g. "1.44k/s"
@@ -190,7 +194,6 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     await fs.writeFile(join(capDir, 'spot-raw.png'), crop.png)
   } catch {}
 
-  const worker = await getWorker()
   // Page shape: blocks[] -> paragraphs[] -> lines[] (there is NO top-level `lines`).
   const linesOf = (data: unknown): OcrLine[] => {
     const d = data as {
@@ -224,37 +227,66 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   }
   const t0 = Date.now()
   const raw = thumb.toBitmap()
-  const cooked = binarizeUpscale(raw, size.width, size.height)
-  try {
-    await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
-  } catch {}
   dbg(`start crop=${size.width}x${size.height} origin=${Math.round(crop.originX)},${Math.round(crop.originY)}`)
-  // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
-  // fully-automatic segmentation, and a tight whitelist stops the engine
-  // wasting effort on pipes/sky glyphs. Verified on shot1.png:
-  // default PSM+charset reads nothing; this reads "92.80K/s" cleanly.
-  try {
-    await (worker as unknown as { setParameters: (p: Record<string, string>) => Promise<void> }).setParameters({
-      tessedit_pageseg_mode: '6',
-      tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ '
-    })
-  } catch {}
-  // blocks:true is required — without it tesseract.js returns text only
-  // (blocks=null) and every spot collapses to the crop center, making
-  // crosshair-distance ranking impossible. Verified on shot1.png.
-  const recognized = await (worker as unknown as {
-    recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
-  }).recognize(cooked, {}, { blocks: true })
-  const lines = linesOf((recognized as { data: unknown }).data)
-  const spots = extractSpots(lines, {
+
+  // Shared frame geometry for both passes.
+  const frame = {
     frameW: crop.frameW,
     frameH: crop.frameH,
     originX: crop.originX,
     originY: crop.originY,
-    scale: crop.scale,
-    upscale: 3
-  })
-  dbg(`done in=${Date.now() - t0}ms lines=${lines.length} spots=${spots.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+    scale: crop.scale
+  }
+
+  // Pass 1 (primary): PP-OCRv5 recognition on teal-mask line strips.
+  // Strictly better than Tesseract on game font (shot1: exact "15.50B";
+  // shot2: keeps the leading 9 in "92.80K/s"). Any failure — missing
+  // models, no native binding — falls through to the Tesseract pass.
+  let lines: OcrLine[] = []
+  let upscale = PPOCR_UPSCALE
+  let pass = 'ppocr'
+  try {
+    const { recognizeLines } = await import('./ppocr')
+    const tPp = Date.now()
+    lines = await recognizeLines(raw, size.width, size.height)
+    dbg(`ppocr in=${Date.now() - tPp}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+  } catch (e) {
+    dbg(`ppocr failed, falling back to tesseract: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
+    lines = []
+  }
+  let spots = extractSpots(lines, { ...frame, upscale })
+
+  if (spots.length === 0) {
+    // Pass 2 (fallback): Tesseract on the binarized + 3x upscaled crop.
+    // Runs when pass 1 yields no usable spots — a missed rate label gets a
+    // second chance; genuine negatives just take a few seconds longer.
+    // Worker spins up lazily here so PP-OCR hits never pay for it.
+    const worker = await getWorker()
+    const cooked = binarizeUpscale(raw, size.width, size.height)
+    try {
+      await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
+    } catch {}
+    // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
+    // fully-automatic segmentation, and a tight whitelist stops the engine
+    // wasting effort on pipes/sky glyphs.
+    try {
+      await (worker as unknown as { setParameters: (p: Record<string, string>) => Promise<void> }).setParameters({
+        tessedit_pageseg_mode: '6',
+        tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ '
+      })
+    } catch {}
+    // blocks:true is required — without it tesseract.js returns text only
+    // (blocks=null) and every spot collapses to the crop center, making
+    // crosshair-distance ranking impossible. Verified on shot1.png.
+    const recognized = await (worker as unknown as {
+      recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
+    }).recognize(cooked, {}, { blocks: true })
+    lines = linesOf((recognized as { data: unknown }).data)
+    upscale = 3
+    pass = 'center-crop'
+    spots = extractSpots(lines, { ...frame, upscale })
+  }
+  dbg(`done in=${Date.now() - t0}ms pass=${pass} lines=${lines.length} spots=${spots.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
 
   return {
     spots,
@@ -263,7 +295,7 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       frameH: size.height,
       lines: lines.length,
       sample: lines.map(l => l.text).join(' | ').slice(0, 200),
-      pass: 'center-crop'
+      pass
     }
   }
 }
