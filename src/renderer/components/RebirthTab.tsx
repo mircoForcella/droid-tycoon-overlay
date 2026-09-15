@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { REBIRTH_PATHS, RebirthPath } from '../data/rebirths'
+import { REBIRTH_PATHS } from '../data/rebirths'
 import { getDroidDef, getSellValue, formatCredits } from '../data/droidValues'
 import { getDroidCard } from '../data/droidCards'
 import { PaintTag, TierTag } from './RarityTags'
+import type { DroidDef } from '../data/droidValues'
 
-// Sell safety is derived from the data: a requirement is "needed later" if the
-// same droid appears in any later rebirth of the same path.
-function laterUse(path: RebirthPath, stepN: number, droidId: string): number[] {
+// Per-step KEEP/SELL for the browse cards below: a requirement is "needed
+// later" if the same droid appears in any later rebirth of the same path.
+function laterUse(path: { steps: Array<{ n: number; requires: Array<{ droidId: string }> }> }, stepN: number, droidId: string): number[] {
   return path.steps
     .filter(s => s.n > stepN && s.requires.some(r => r.droidId === droidId))
     .map(s => s.n)
@@ -16,7 +17,6 @@ function laterUse(path: RebirthPath, stepN: number, droidId: string): number[] {
 export function RebirthTab() {
   const [path, setPath] = useState(1)
   const [query, setQuery] = useState('')
-  const [allPaths, setAllPaths] = useState(false)
   const data = REBIRTH_PATHS.find(p => p.path === path)!
   const progress = useStore(s => s.rebirthProgress[String(path)] ?? 1)
   const setProgress = useStore(s => s.setRebirthProgress)
@@ -35,17 +35,46 @@ export function RebirthTab() {
   }, [])
 
   const q = query.trim().toLowerCase()
-  const searchPaths = q.length > 0 ? (allPaths ? REBIRTH_PATHS : [data]) : []
-  const searchHits = searchPaths.flatMap(pd =>
-    pd.steps.flatMap(s =>
-      s.requires
-        .map((r, i) => ({ path: pd, step: s, req: r, idx: i }))
-        .filter(({ req }) => {
-          const def = getDroidDef(req.droidId)
-          return def && (def.name.toLowerCase().includes(q) || def.tier.toLowerCase().includes(q))
-        })
-    )
-  )
+  // "sell epic" (or bare "sell") = safe-seller mode for a tier. Anything
+  // else is a droid/tier search, grouped one row per droid.
+  const SELL_TIERS = ['common', 'rare', 'epic', 'legendary', 'mythic']
+  const sellWord = q === 'sell' ? 'any' : q.startsWith('sell ') ? q.slice(5).trim() : null
+  const sellTier = sellWord !== null && (sellWord === 'any' || SELL_TIERS.includes(sellWord)) ? sellWord : null
+  const isSellQuery = sellTier !== null
+
+  interface Use { n: number; quality: string; cost: number }
+  interface Group { def: DroidDef; uses: Use[] }
+  const groups = new Map<string, Group>()
+  if (q.length > 0 && !isSellQuery) {
+    for (const s of data.steps) {
+      for (const r of s.requires) {
+        const def = getDroidDef(r.droidId)
+        if (!def) continue
+        if (!(def.name.toLowerCase().includes(q) || def.tier.toLowerCase().includes(q))) continue
+        let g = groups.get(r.droidId)
+        if (!g) {
+          g = { def, uses: [] }
+          groups.set(r.droidId, g)
+        }
+        g.uses.push({ n: s.n, quality: r.quality, cost: s.cost })
+      }
+    }
+  }
+  const grouped = [...groups.values()]
+    .map(g => ({ ...g, uses: g.uses.sort((a, b) => a.n - b.n) }))
+    .sort((a, b) => a.def.name.localeCompare(b.def.name))
+
+  // Safe sellers: tier droids in this path with no requirement at or after
+  // progress. Paint is irrelevant, one row per droid, never Iconic.
+  const sellList = isSellQuery
+    ? [...new Map(
+        data.steps.flatMap(s => s.requires.map(r => [r.droidId, getDroidDef(r.droidId)] as const))
+      ).values()]
+        .filter((def): def is DroidDef => !!def && def.tier !== 'Iconic')
+        .filter(def => sellTier === 'any' || def.tier.toLowerCase() === sellTier)
+        .filter(def => !data.steps.some(s => s.n >= progress && s.requires.some(r => r.droidId === def.id)))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : []
 
   const visibleSteps = data.steps.filter(s => s.n >= progress)
   const hiddenCount = data.steps.length > 0 ? progress - 1 : 0
@@ -71,18 +100,12 @@ export function RebirthTab() {
 
       <input
         id="rebirth-search"
-        placeholder="Search droid — where is it needed in this path?"
+        placeholder="Search droid, or 'sell epic' for safe sellers…"
         value={query}
         onChange={e => setQuery(e.target.value)}
         style={{ width: '100%', padding: 8, marginBottom: 4, borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.4)', color: 'var(--text)' }}
       />
       <div className="hotkey-hint" style={{ marginBottom: 4 }}>F10 to type • F10 again clears + back to game</div>
-      {q.length > 0 && (
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, cursor: 'pointer' }}>
-          <input type="checkbox" checked={allPaths} onChange={e => setAllPaths(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />
-          Search all 5 paths
-        </label>
-      )}
 
       {q.length === 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -108,29 +131,66 @@ export function RebirthTab() {
       )}
 
       {q.length > 0 && (
-        searchHits.length === 0 ? (
-          <div className="hotkey-hint">No result found — "{query.trim()}" is not needed in {allPaths ? 'any path' : `Path ${path}`}.</div>
+        isSellQuery ? (
+          sellList.length === 0 ? (
+            <div className="hotkey-hint">Nothing safe to sell{sellTier !== 'any' ? ` in ${sellTier}` : ''} from RB {progress} on — everything left is needed again.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--green)' }}>
+                {sellList.length} safe to sell{sellTier !== 'any' ? ` (${sellTier})` : ''} — never needed again from RB {progress}
+              </div>
+              {sellList.map(def => {
+                const card = getDroidCard(def.id)
+                return (
+                  <div key={def.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--green)', borderRadius: 6 }}>
+                    {card ? (
+                      <img src={card} alt={def.name} className="rebirth-thumb" width={44} height={52} loading="lazy" />
+                    ) : (
+                      <span style={{ fontSize: 18, width: 44, textAlign: 'center' }}>{def.icon}</span>
+                    )}
+                    <span style={{ flex: 1 }}>
+                      <strong>{def.name}</strong> <TierTag tier={def.tier} />
+                      <br />
+                      <span style={{ fontSize: 10, color: 'var(--green)' }}>SAFE TO SELL ✔</span>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        ) : grouped.length === 0 ? (
+          <div className="hotkey-hint">No result found — "{query.trim()}" is not needed in Path {path}.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {searchHits.map(({ path: pd, step, req }, k) => {
-              const def = getDroidDef(req.droidId)!
-              const later = laterUse(pd, step.n, req.droidId)
-              const done = pd.path === path && step.n < progress
-              const card = getDroidCard(req.droidId)
+            {grouped.map(({ def, uses }) => {
+              const next = uses.find(u => u.n >= progress)
+              const done = !next
+              const card = getDroidCard(def.id)
               return (
-                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 6, opacity: done ? 0.55 : 1 }}>
+                <div key={def.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 6, opacity: done ? 0.55 : 1 }}>
                   {card ? (
                     <img src={card} alt={def.name} className="rebirth-thumb" width={44} height={52} loading="lazy" />
                   ) : (
                     <span style={{ fontSize: 18, width: 44, textAlign: 'center' }}>{def.icon}</span>
                   )}
                   <span style={{ flex: 1 }}>
-                    <strong style={{ color: 'var(--gold)' }}>P{pd.path} · RB {step.n}</strong> — {def.name}{' '}
-                    <TierTag tier={def.tier} /> <PaintTag quality={req.quality} />
+                    <strong>{def.name}</strong> <TierTag tier={def.tier} />
                     <br />
                     <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-                      Cost {formatCredits(step.cost)} • Sell {formatCredits(getSellValue(def, req.quality))}
-                      {later.length > 0 ? ` • needed again RB ${later.join(', ')}` : ' • not needed later'}
+                      {uses.map((u, i) => (
+                        <span key={i}>
+                          {i > 0 && ' · '}
+                          <strong style={{ color: u.n < progress ? 'var(--text-dim)' : u.n === progress ? 'var(--gold)' : 'var(--text)' }}>
+                            RB {u.n}
+                          </strong>{' '}
+                          <PaintTag quality={u.quality} />{' '}
+                          <span style={{ color: 'var(--text-dim)' }}>{formatCredits(u.cost)}</span>
+                        </span>
+                      ))}
+                    </span>
+                    <br />
+                    <span style={{ fontSize: 10, color: next ? 'var(--red)' : 'var(--green)' }}>
+                      {next ? `KEEP — next RB ${next.n}` : 'SELL ✔ — never needed again'}
                       {done ? ' • done ✓' : ''}
                     </span>
                   </span>
