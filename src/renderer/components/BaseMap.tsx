@@ -210,7 +210,10 @@ export function SpotButton() {
       const res = await window.electronAPI.spotIncomes()
       const spots = res?.spots ?? []
       useStore.getState().setSpots(spots)
-      if (spots.length === 0) {
+      useStore.getState().setSpotMatchOpen(false)
+      if (spots.some(sp => findByIncome(sp.value).length > 0)) {
+        useStore.getState().setSpotMatchOpen(true)
+      } else if (spots.length === 0) {
         const meta = res?.meta
         setNote(
           meta && meta.lines === 0

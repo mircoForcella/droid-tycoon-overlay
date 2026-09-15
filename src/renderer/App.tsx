@@ -6,6 +6,7 @@ import { Timers } from './components/Timers'
 import { Settings } from './components/Settings'
 import { RebirthTab } from './components/RebirthTab'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { SpotMatchModal } from './components/SpotMatchModal'
 import { findByIncome } from './data/income'
 import { formatCredits, getSellValue } from './data/droidValues'
 
@@ -13,6 +14,16 @@ function Toast() {
   const toast = useStore(s => s.toast)
   if (!toast) return null
   return <div className="toast">{toast.msg}</div>
+}
+
+function SpotMatch() {
+  const open = useStore(s => s.spotMatchOpen)
+  if (!open) return null
+  return (
+    <ErrorBoundary name="SpotMatch">
+      <SpotMatchModal />
+    </ErrorBoundary>
+  )
 }
 
 function App() {
@@ -96,6 +107,7 @@ function App() {
       unsubs.push(api.onIncomeSpots((spots) => {
         const st = useStore.getState()
         st.setSpots(spots)
+        st.setSpotMatchOpen(false)
         // Instant path: a station picker is already open (armed) and the read
         // matches exactly one droid → place it immediately, no more taps.
         // F9 UX is "aim at the droid": try the crosshair-closest spot first.
@@ -117,6 +129,13 @@ function App() {
               return
             }
           }
+        }
+        // Match popup: any spot with table hits → centered window to confirm
+        // the card (or pick one) and choose station + slot. No area filter:
+        // any droid can work any station, the user decides where it goes.
+        if (spots.some(sp => findByIncome(sp.value).length > 0)) {
+          st.setSpotMatchOpen(true)
+          return
         }
         st.showToast(
           spots.length > 0
@@ -220,6 +239,7 @@ function App() {
         </ErrorBoundary>
       </div>
       <Toast />
+      <SpotMatch />
 
     </div>
   )

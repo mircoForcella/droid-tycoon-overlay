@@ -46,6 +46,9 @@ interface AppState {
   suggestions: SlotSuggestion[]
   spots: Array<{ text: string; value: number; rx: number; ry: number }>
   setSpots: (spots: AppState['spots']) => void
+  // Post-spot match popup (F9 result): confirm card, pick station + slot.
+  spotMatchOpen: boolean
+  setSpotMatchOpen: (v: boolean) => void
   toast: { msg: string; at: number } | null
   showToast: (msg: string) => void
   rebirthProgress: Record<string, number>
@@ -125,6 +128,10 @@ export const useStore = create<AppState>()(
       spots: [],
 
       setSpots: (spots) => set({ spots }),
+
+      spotMatchOpen: false,
+
+      setSpotMatchOpen: (v) => set({ spotMatchOpen: v }),
 
       rebirthProgress: {},
 
