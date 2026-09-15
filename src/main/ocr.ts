@@ -174,8 +174,18 @@ export interface SpotResult {
   meta: { frameW: number; frameH: number; lines: number; sample: string; pass: string }
 }
 
-export async function spotIncomes(displayId: number | null = null): Promise<SpotResult> {
-  const { captureAllCenterCrops, captureFortniteWindowCrop } = await import('./capture')
+import type { DisplayCrop } from './capture'
+
+// Pre-load all OCR engines (PP-OCR sessions + Tesseract worker) while idle
+// after launch, so the first F9 never pays init. Same sessions F9 uses;
+// zero effect on what gets detected.
+export async function warmupOcr(): Promise<void> {
+  const { warmup } = await import('./ppocr')
+  await warmup()
+  await getWorker()
+}
+
+export async function spotIncomes(displayId: number | null = null): Promise<SpotResult> {  const { captureAllCenterCrops, captureFortniteWindowCrop } = await import('./capture')
   const fs = await import('fs/promises')
   const capDir = join(app.getPath('userData'), 'captures')
   try {
@@ -187,7 +197,9 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       appendFileSync(join(app.getPath('userData'), 'app.log'), `[${new Date().toISOString()}] [ocr-spot] ${m}\n`)
     } catch {}
   }
-  const crops = await captureAllCenterCrops()
+  // Lazy capture: game window first (the common path screenshots nothing
+  // else). Screens are only captured at all when the window is missing.
+  const crops: DisplayCrop[] = []
   // Game window first: screenshots ONLY Fortnite (no monitor guessing).
   // This block is proven correct; do not touch it.
   try {
@@ -195,26 +207,26 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     dbg(`windows seen: ${candidates.slice(0, 12).join(' | ').slice(0, 300)}`)
     if (win) {
       dbg(`game-window crop ${win.frameW}x${win.frameH}`)
-      crops.unshift(win)
+      crops.push(win)
     } else {
       dbg('game window not found, using display crops')
     }
   } catch (e) {
     dbg(`game-window capture failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
   }
-  // ONE capture per F9: the game window if found (unshifted to front above),
-  // else a single display crop (explicit choice, then primary, then
-  // brightest). No monitor loop — reading every screen was slow and sprayed
-  // confusing debug files. The game-window block above is proven correct;
-  // do not touch it.
+  // ONE capture per F9: the game window if found, else a single display
+  // crop (explicit choice, then primary, then brightest). Screens are only
+  // captured when the game window is missing — never speculatively.
+  // The game-window block above is proven correct; do not touch it.
   let attempt = crops.find(c => c.displayId === -1) ?? null
-  if (!attempt && crops.length > 0) {
-    const preferred = displayId ?? crops.find(c => c.primary)?.displayId ?? null
-    attempt = [...crops].sort((a, b) =>
+  if (!attempt) {
+    const screenCrops = await captureAllCenterCrops()
+    const preferred = displayId ?? screenCrops.find(c => c.primary)?.displayId ?? null
+    attempt = [...screenCrops].sort((a, b) =>
       ((b.displayId === preferred) ? 1 : 0) - ((a.displayId === preferred) ? 1 : 0) ||
       Number(b.primary) - Number(a.primary) ||
       b.brightness - a.brightness
-    )[0]
+    )[0] ?? null
   }
   if (!attempt) return { spots: [], meta: { frameW: 0, frameH: 0, lines: 0, sample: 'no-frame', pass: 'none' } }
   const crop = attempt

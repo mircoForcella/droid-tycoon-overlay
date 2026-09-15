@@ -84,6 +84,13 @@ async function getDetSession() {
   return detPromise
 }
 
+// Pre-load both models + the native binding (called ~10s after launch while
+// idle). F9 must never pay first-use init. Safe to call repeatedly.
+export async function warmup(): Promise<void> {
+  await getRecSession()
+  await getDetSession()
+}
+
 // Fraction of teal pixels below which the mask is declared empty (wrong
 // monitor, washed-out thumbnail). Game frames measure ~1%; a chat window
 // leaves only specks (~0.01%). Callers fall back to Otsu in that case.
@@ -395,6 +402,10 @@ async function detectBoxes(
   w: number,
   h: number
 ): Promise<Box[]> {
+  // Detection boxes only locate text — recognition renders from full-res raw
+  // pixels — but the box precision itself matters: at 640px the detector
+  // merges neighboring glyphs ("92.80K/s" -> "792.80K/s" on shot1), so the
+  // cap stays 960px. Verified exact on shot1/shot2.
   const scale = Math.min(1, 960 / Math.max(w, h))
   let dw = Math.max(32, Math.round(w * scale))
   let dh = Math.max(32, Math.round(h * scale))

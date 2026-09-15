@@ -6,7 +6,7 @@ import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { appendFileSync } from 'fs'
 import { captureGameWindow, detectDroids, loadTemplates, getLoadedTemplates, scanBase } from './capture'
-import { spotIncomes } from './ocr'
+import { spotIncomes, warmupOcr } from './ocr'
 
 const __dirname = join(fileURLToPath(import.meta.url), '..')
 
@@ -562,6 +562,10 @@ app.whenReady().then(async () => {
   if (app.isPackaged) {
     setTimeout(() => { manualCheckForUpdates() }, 20000)
   }
+  // Warm up OCR engines while idle so the first F9 pays no init cost.
+  setTimeout(() => {
+    warmupOcr().catch(e => log(`ocr warmup failed (first F9 will be slower): ${e}`))
+  }, 10000)
 
   ipcMain.handle('get-version', () => app.getVersion())
   ipcMain.handle('check-for-updates', () => manualCheckForUpdates())
