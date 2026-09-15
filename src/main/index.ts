@@ -267,14 +267,26 @@ let spotWin: BrowserWindow | null = null
 let pendingSpots: SpotPayload[] = []
 let spotReqSeq = 0
 const spotReqs = new Map<number, (res: { ok: boolean; message: string }) => void>()
+// True when WE flipped to interactive for the spot window (so close hands
+// the mouse back to the game). Untouched when the user was already typing.
+let spotRestoreGame = false
 
 function openSpotWindow(spots: SpotPayload[]) {
   pendingSpots = spots
+  // The popup is useless if the mouse is still captured by the game:
+  // free the cursor on open (same as F2 panel mode).
+  if (isClickThrough) {
+    setInteractive(true)
+    spotRestoreGame = true
+  }
   if (spotWin && !spotWin.isDestroyed()) {
     try {
+      spotWin.setIgnoreMouseEvents(false)
+      spotWin.setFocusable(true)
       spotWin.webContents.send('spot-data', spots)
       spotWin.showInactive()
       spotWin.moveTop()
+      spotWin.focus()
     } catch {}
     return
   }
@@ -321,6 +333,11 @@ function openSpotWindow(spots: SpotPayload[]) {
   try {
     spotWin.showInactive()
   } catch {}
+  try {
+    spotWin.setIgnoreMouseEvents(false)
+    spotWin.setFocusable(true)
+    spotWin.focus()
+  } catch {}
   log('spot window created')
 }
 
@@ -329,6 +346,10 @@ function closeSpotWindow() {
     spotWin?.destroy()
   } catch {}
   spotWin = null
+  if (spotRestoreGame) {
+    spotRestoreGame = false
+    setInteractive(false)
+  }
 }
 
 // Placement runs in ONE panel window (first on the primary display) —
