@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { ALL_SLOTS } from '../data/droids'
 import { findByIncome, formatIncome } from '../data/income'
 import { formatCredits, getSellValue } from '../data/droidValues'
+import { getDroidCard } from '../data/droidCards'
 
 const STATIONS = [
   { id: 'workers', label: 'Workers' },
@@ -78,17 +79,28 @@ export function SpotMatchModal() {
         )}
 
         <div className="droid-picker" style={{ gridTemplateColumns: `repeat(${Math.min(hits.length, 3)}, 1fr)` }}>
-          {hits.map((h, i) => (
-            <button key={`${h.def.id}-${h.quality}`} onClick={() => { setHitIdx(i); setSlotId(null) }}
-              className="droid-option"
-              style={i === hi ? { borderColor: 'var(--gold)', background: 'rgba(255,200,50,0.12)' } : undefined}>
-              <div className="droid-option-icon">{h.def.icon}</div>
-              <div className="droid-option-name">{h.def.name}</div>
-              <div className="droid-option-value" style={{ color: 'var(--text-dim)' }}>{h.def.tier} {h.quality}{h.def.fusion ? ' • fusion' : ''}</div>
-              <div className="droid-option-value">💰 {formatIncome(h.income)}</div>
-              <div className="droid-option-value">{formatCredits(getSellValue(h.def, h.quality))}</div>
-            </button>
-          ))}
+          {hits.map((h, i) => {
+            const card = getDroidCard(h.def.id)
+            return (
+              <button key={`${h.def.id}-${h.quality}`} onClick={() => { setHitIdx(i); setSlotId(null) }}
+                className={`rebirth-card spot-card${i === hi ? ' spot-pick' : ''}`}>
+                {card ? (
+                  <img src={card} alt={h.def.name} className="rebirth-card-bg" loading="lazy" />
+                ) : (
+                  <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 54 }}>{h.def.icon}</span>
+                )}
+                <div className="rebirth-card-scrim" />
+                <div className="rebirth-card-body">
+                  <div className="rebirth-card-name">{h.def.name}</div>
+                  <div>
+                    <div className="rebirth-card-sub">{h.def.tier} {h.quality}{h.def.fusion ? ' • fusion' : ''}</div>
+                    <div className="rebirth-card-sub">💰 {formatIncome(h.income)}</div>
+                    <div className="rebirth-card-sell">{formatCredits(getSellValue(h.def, h.quality))}</div>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         <div className="section-title" style={{ marginTop: 12 }}>Station</div>

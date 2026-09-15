@@ -291,13 +291,21 @@ body { background: transparent; color: var(--text); }
 .rebirth-thumb {
   width: 44px;
   height: 52px;
-  object-fit: cover;
-  object-position: center 20%;
+  object-fit: cover;  object-position: center 20%;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: #000;
   flex-shrink: 0;
 }
+
+/* Spot-match popup picks: same artwork-background card system, but the name
+   must win at a glance — bigger name pill, clear picked outline. Buttons
+   reset native styling so the card art carries the visuals. */
+button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor: pointer; }
+.spot-card .rebirth-card-name { font-size: 14px; padding: 3px 9px; }
+.spot-card .rebirth-card-sub { font-size: 11px; }
+.spot-card .rebirth-card-sell { font-size: 12px; }
+.spot-card.spot-pick { outline: 3px solid var(--gold); outline-offset: -1px; }
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; width: 90%; max-width: 400px; max-height: 80vh; overflow-y: auto; }
