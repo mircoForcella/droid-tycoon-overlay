@@ -12,8 +12,8 @@ export const INCOME_MULTIPLIERS: Record<Exclude<Tier, 'Iconic'>, number[]> = {
 }
 
 export const INCOME_BASE: Record<string, number> = {
-  // TODO: real credits/sec for protocol droids (roster confirmed by sheet)
-  'sa-5': 0, lom: 0, pz: 0, tda: 0,
+  // Protocol values verified against Droid Reference Sheet
+  'sa-5': 14, lom: 105, pz: 900, tda: 4000,
   // Common
   mouse: 2, pit: 2, gonk: 4, cb: 3, r3: 3, r5: 3, r8: 4,
   'imp-probe': 6, 'b1-battle': 5, 'drk1-probe': 3, id10: 4,

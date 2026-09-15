@@ -74,8 +74,8 @@ export const DROIDS: DroidDef[] = [
   R('vect-arm', 'Vect-Arm', 36400, 'battle', '🦾'),
   R('hov-r', 'HOV-R', 98000, 'battle', '🛸'),
   R('btl-r', 'BTL-R', 227500, 'battle', '⚙️', true),
-  // Protocol (base sell + income TBD — roster confirmed by sheet)
-  R('sa-5', 'SA-5', 0, 'protocol', '📡'),
+  // Protocol (values verified against Droid Reference Sheet)
+  R('sa-5', 'SA-5', 126000, 'protocol', '📡'),
   // ---- Epic ----
   E('groundmech', 'Groundmech', 630000, 'workers', '🚜'),
   E('l0', 'L0', 1470000, 'workers', '🤖'),
@@ -98,9 +98,9 @@ export const DROIDS: DroidDef[] = [
   E('haul-r', 'Haul-R', 1680000, 'battle', '🚚'),
   E('lng-shot', 'LNG-Shot', 2940000, 'battle', '🔫'),
   E('arm-core', 'ARM-Core', 9200000, 'battle', '⚙️', true),
-  E('opt-ar', 'OPT-AR', 9520000, 'battle', '⚙️', true),
-  // Protocol (base sell + income TBD — roster confirmed by sheet)
-  E('lom', 'LOM', 0, 'protocol', '🦾'),
+  E('opt-ar', 'OPT-AR', 9240000, 'battle', '⚙️', true),
+  // Protocol (values verified against Droid Reference Sheet)
+  E('lom', 'LOM', 4900000, 'protocol', '🦾'),
   // ---- Legendary ----
   L('proto-roller', 'Proto-Roller', 15400000, 'workers', '🛞'),
   L('mecha-droid', 'Mecha-Droid', 20300000, 'workers', '🤖'),
@@ -114,8 +114,8 @@ export const DROIDS: DroidDef[] = [
   L('cyclo-grav', 'Cyclo-Grav', 21000000, 'battle', '🌀'),
   L('opti-strk', 'Opti-STRK', 25900000, 'battle', '🎯'),
   L('orb-xl', 'ORB-XL', 56000000, 'battle', '⚙️', true),
-  // Protocol (base sell + income TBD — roster confirmed by sheet)
-  L('pz', 'PZ', 0, 'protocol', '🌀'),
+  // Protocol (values verified against Droid Reference Sheet)
+  L('pz', 'PZ', 25900000, 'protocol', '🌀'),
   // ---- Mythic ----
   M('snow-mouse', 'Snow Mouse', 126000000, 'workers', '🐭'),
   M('ric', 'RIC', 142800000, 'workers', '🤖'),
@@ -134,8 +134,8 @@ export const DROIDS: DroidDef[] = [
   M('kx', 'KX', 210000000, 'battle', '🛡️'),
   M('srv-o', 'SRV-O', 224000000, 'battle', '⚙️', true),
   M('x-onk', 'X-ONK', 252000000, 'battle', '⚙️', true),
-  // Protocol (base sell + income TBD — roster confirmed by sheet)
-  M('tda', 'TDA', 0, 'protocol', '🔭'),
+  // Protocol (values verified against Droid Reference Sheet)
+  M('tda', 'TDA', 280000000, 'protocol', '🔭'),
   // ---- Iconic (no credit sell value, global buffs) ----
   ...[
     ['c3po', 'C-3PO', '2x Droid Sell Value'],
