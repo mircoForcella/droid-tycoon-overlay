@@ -166,6 +166,9 @@ function App() {
       }
     }
     window.addEventListener('keydown', onKey)
+    // Always launch expanded: a persisted minimized state must never greet
+    // the user (F1 minimizes, but relaunch reopens).
+    useStore.getState().setCollapsed(false)
     // Re-apply saved monitor choice (main starts with 'all')
     const pref = useStore.getState().overlayDisplay
     if (pref !== 'all') api?.setOverlayDisplay(Number(pref))
@@ -196,30 +199,13 @@ function App() {
   }
 
   return (
-    <div ref={panelRef} className="overlay-panel" style={{ pointerEvents: clickThrough ? 'none' : 'auto', width: panelWidth, ...(customH ? { height: customH } : {}) }}>
+    <div ref={panelRef} className={`overlay-panel ${clickThrough ? 'mode-game' : 'mode-panel'}`} title={clickThrough ? 'Game mode — clicks pass through to Fortnite (F2 to interact)' : 'Panel mode — overlay interactive (F2 for game)'} style={{ pointerEvents: clickThrough ? 'none' : 'auto', width: panelWidth, ...(customH ? { height: customH } : {}) }}>
       {!clickThrough && !collapsed && (
         <>
           <div className="resize-handle left" onMouseDown={beginResize('w')} onDoubleClick={() => useStore.getState().setPanelW(null)} title="Drag to resize width — double-click resets" />
           <div className="resize-handle bottom" onMouseDown={beginResize('h')} onDoubleClick={() => useStore.getState().setPanelH(null)} title="Drag to resize height — double-click resets" />
         </>
       )}
-      <div className="panel-header">
-        <span className="panel-title">Droid Tycoon Overlay</span>
-        <span className={`mode-badge ${clickThrough ? 'game' : 'panel'}`} title={clickThrough ? 'Clicks pass through to Fortnite (F2 to interact)' : 'Overlay interactive (F2 for game)'}>
-          {clickThrough ? '🎮 GAME' : '🖱️ PANEL'}
-        </span>
-        <div className="header-btns">
-          <button className="icon-btn" title="Collapse to pull-tab (F8)" onClick={() => useStore.getState().setCollapsed(true)}>
-            —
-          </button>
-          <button className="icon-btn" title="Toggle Click-Through (F2)" onClick={() => window.electronAPI?.setClickThrough(!clickThrough)}>
-            {clickThrough ? '🔓' : '🔒'}
-          </button>
-          <button className="icon-btn" title="Hide Overlay (F1)" onClick={() => window.electronAPI?.setVisible(false)}>
-            👁️
-          </button>
-        </div>
-      </div>
 
       <div className="tabs">
         <button className={`tab-btn ${activeTab === 'droids' ? 'active' : ''}`} onClick={() => useStore.getState().setActiveTab('droids')}>Droids <kbd>F3</kbd></button>

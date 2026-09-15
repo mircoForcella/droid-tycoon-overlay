@@ -38,14 +38,10 @@ body { background: transparent; color: var(--text); }
   backdrop-filter: blur(10px);
 }
 
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: linear-gradient(90deg, rgba(255,200,50,0.15), transparent);
-  border-bottom: 1px solid var(--border);
-}
+/* Panel frame doubles as the mode indicator (no header bar):
+   gold = game mode (clicks pass through), light green = panel interactive. */
+.overlay-panel.mode-game { border-color: var(--gold); }
+.overlay-panel.mode-panel { border-color: #90ee90; box-shadow: 0 0 14px rgba(144, 238, 144, 0.35), var(--shadow); }
 
 .panel-title { font-weight: 700; font-size: 14px; letter-spacing: 0.5px; color: var(--gold); text-transform: uppercase; }
 

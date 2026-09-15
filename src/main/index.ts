@@ -438,7 +438,7 @@ function setupTray() {
     log(`tray failed: ${e}`)
     return
   }
-  tray.setToolTip('Droid Tycoon Overlay (F1 show/hide)')
+  tray.setToolTip('Droid Tycoon Overlay (F1 minimize/restore)')
   const menu = Menu.buildFromTemplate([
     {
       label: 'Show overlay',
@@ -488,7 +488,7 @@ app.whenReady().then(async () => {
   // Timers live detached by default; renderer sends its saved pref on load.
   createTimerWindow()
 
-  globalShortcut.register('F1', () => toggleVisibility())
+  globalShortcut.register('F1', () => broadcast('toggle-collapse'))
   globalShortcut.register('F2', () => toggleClickThrough())
   // Tabs left-to-right: F3 Droids, F4 Rebirth, F5 Calculator, F6 Setup, F7 Timers (last)
   globalShortcut.register('F3', () => broadcast('open-tab', 'droids'))
