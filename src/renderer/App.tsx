@@ -6,7 +6,7 @@ import { Timers } from './components/Timers'
 import { Settings } from './components/Settings'
 import { RebirthTab } from './components/RebirthTab'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { SpotMatchModal } from './components/SpotMatchModal'
+import { SpotMatchModal, SpotPlaceModal } from './components/SpotMatchModal'
 import { findByIncome } from './data/income'
 import { formatCredits, getSellValue } from './data/droidValues'
 
@@ -17,11 +17,13 @@ function Toast() {
 }
 
 function SpotMatch() {
-  const open = useStore(s => s.spotMatchOpen)
-  if (!open) return null
+  const matchOpen = useStore(s => s.spotMatchOpen)
+  const place = useStore(s => s.spotPlace)
+  if (!matchOpen && !place) return null
   return (
     <ErrorBoundary name="SpotMatch">
-      <SpotMatchModal />
+      {matchOpen && <SpotMatchModal />}
+      {place && <SpotPlaceModal />}
     </ErrorBoundary>
   )
 }

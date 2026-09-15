@@ -49,6 +49,9 @@ interface AppState {
   // Post-spot match popup (F9 result): confirm card, pick station + slot.
   spotMatchOpen: boolean
   setSpotMatchOpen: (v: boolean) => void
+  // Step 2 payload: droid confirmed in step 1, awaiting station + slot.
+  spotPlace: { droidId: string; quality: Quality } | null
+  setSpotPlace: (v: { droidId: string; quality: Quality } | null) => void
   toast: { msg: string; at: number } | null
   showToast: (msg: string) => void
   rebirthProgress: Record<string, number>
@@ -132,6 +135,10 @@ export const useStore = create<AppState>()(
       spotMatchOpen: false,
 
       setSpotMatchOpen: (v) => set({ spotMatchOpen: v }),
+
+      spotPlace: null,
+
+      setSpotPlace: (v) => set({ spotPlace: v }),
 
       rebirthProgress: {},
 
