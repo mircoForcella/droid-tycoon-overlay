@@ -160,8 +160,8 @@ export async function captureFortniteWindowCrop(
       displayId: -1, // sentinel: game window, not a display
       frameW: size.width,
       frameH: size.height,
-      originX: 0,
-      originY: 0,
+      originX: x,
+      originY: y,
       scale: 1,
       primary: true,
       brightness: Number.MAX_SAFE_INTEGER

@@ -6,6 +6,7 @@ const { PNG } = require('pngjs')
 const { createWorker } = require('tesseract.js')
 
 const PPOCR_UPSCALE = 2
+const MIN_TEAL_INK = 0.001
 
 // ---------- shared parsers (mirror ocr.ts) ----------
 function parseIncomeText(text) {
@@ -52,19 +53,59 @@ function extractSpots(lines, frame) {
 }
 
 // ---------- pass 1: PP-OCRv5 (mirror ppocr.ts) ----------
-function tealMask(src, w, h) {
-  const scale = PPOCR_UPSCALE, W = w * scale, H = h * scale
+function tealMask(src, w, h, scale) {
+  const W = w * scale, H = h * scale
   const mask = new Uint8Array(W * H)
+  let ink = 0
   for (let y = 0; y < H; y++) {
     const sy = Math.min(h - 1, (y / scale) | 0)
     for (let x = 0; x < W; x++) {
       const sx = Math.min(w - 1, (x / scale) | 0)
       const si = (sy * w + sx) * 4
       const r = src[si], g = src[si + 1], b = src[si + 2]
-      mask[y * W + x] = (g > 110 && g - r > 45 && b - r > 15) ? 1 : 0
+      const isText = (g > 110 && g - r > 45 && b - r > 15) ? 1 : 0
+      mask[y * W + x] = isText
+      ink += isText
     }
   }
-  return { mask, W, H }
+  return { mask, W, H, ink: ink / (W * H) }
+}
+
+function otsuMask(src, w, h, scale) {
+  const n = w * h
+  const lum = new Uint8Array(n)
+  for (let i = 0; i < n; i++) lum[i] = (src[i * 4] * 77 + src[i * 4 + 1] * 150 + src[i * 4 + 2] * 29) >> 8
+  const hist = new Array(256).fill(0)
+  for (let i = 0; i < n; i++) hist[lum[i]]++
+  let sum = 0
+  for (let t = 0; t < 256; t++) sum += t * hist[t]
+  let sumB = 0, wB = 0, best = -1, thresh = 128
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]
+    if (wB === 0) continue
+    const wF = n - wB
+    if (wF === 0) break
+    sumB += t * hist[t]
+    const mB = sumB / wB, mF = (sum - sumB) / wF
+    const between = wB * wF * (mB - mF) * (mB - mF)
+    if (between > best) { best = between; thresh = t }
+  }
+  let bright = 0
+  for (let i = 0; i < n; i++) if (lum[i] > thresh) bright++
+  const darkBg = bright / n <= 0.5
+  const W = w * scale, H = h * scale
+  const mask = new Uint8Array(W * H)
+  let ink = 0
+  for (let y = 0; y < H; y++) {
+    const sy = Math.min(h - 1, (y / scale) | 0)
+    for (let x = 0; x < W; x++) {
+      const sx = Math.min(w - 1, (x / scale) | 0)
+      const isInk = darkBg ? lum[sy * w + sx] > thresh : lum[sy * w + sx] <= thresh
+      mask[y * W + x] = isInk ? 1 : 0
+      ink += isInk ? 1 : 0
+    }
+  }
+  return { mask, W, H, ink: ink / (W * H) }
 }
 
 function findBoxes(mask, W, H) {
@@ -102,25 +143,27 @@ function groupLines(boxes) {
   return lines.filter(L => (L.x1 - L.x0) >= 20)
 }
 
-function renderStrip(mask, W, H, L, outH, outW) {
+function renderStripColor(src, srcW, srcH, maskScale, L, outH, outW) {
   const pad = 6
-  const x0 = Math.max(0, L.x0 - pad), y0 = Math.max(0, L.y0 - pad)
-  const x1 = Math.min(W - 1, L.x1 + pad), y1 = Math.min(H - 1, L.y1 + pad)
-  const sw = x1 - x0 + 1, sh = y1 - y0 + 1
-  const out = new Float32Array(outH * outW)
-  for (let y = 0; y < outH; y++) {
-    const sy = ((y + 0.5) * sh) / outH - 0.5
-    const yA = Math.max(0, Math.min(sh - 1, Math.floor(sy))), yB = Math.min(sh - 1, yA + 1)
-    const fy = Math.max(0, Math.min(1, sy - Math.floor(sy)))
-    for (let x = 0; x < outW; x++) {
-      const sx = ((x + 0.5) * sw) / outW - 0.5
-      const xA = Math.max(0, Math.min(sw - 1, Math.floor(sx))), xB = Math.min(sw - 1, xA + 1)
-      const fx = Math.max(0, Math.min(1, sx - Math.floor(sx)))
-      const v00 = mask[(y0 + yA) * W + (x0 + xA)], v10 = mask[(y0 + yA) * W + (x0 + xB)]
-      const v01 = mask[(y0 + yB) * W + (x0 + xA)], v11 = mask[(y0 + yB) * W + (x0 + xB)]
-      out[y * outW + x] = (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy
-    }
+  const mx0 = Math.max(0, L.x0 - pad), my0 = Math.max(0, L.y0 - pad)
+  const mx1 = L.x1 + pad, my1 = L.y1 + pad
+  const mw = mx1 - mx0 + 1, mh = my1 - my0 + 1
+  const sample = (gx, gy, ch) => {
+    const x = Math.max(0, Math.min(srcW - 1, gx)), y = Math.max(0, Math.min(srcH - 1, gy))
+    const xA = Math.floor(x), yA = Math.floor(y)
+    const xB = Math.min(srcW - 1, xA + 1), yB = Math.min(srcH - 1, yA + 1)
+    const fx = x - xA, fy = y - yA
+    const v00 = src[(yA * srcW + xA) * 4 + ch], v10 = src[(yA * srcW + xB) * 4 + ch]
+    const v01 = src[(yB * srcW + xA) * 4 + ch], v11 = src[(yB * srcW + xB) * 4 + ch]
+    return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy
   }
+  const out = new Float32Array(3 * outH * outW)
+  for (let y = 0; y < outH; y++)
+    for (let x = 0; x < outW; x++) {
+      const gx = (mx0 + ((x + 0.5) * mw) / outW - 0.5) / maskScale
+      const gy = (my0 + ((y + 0.5) * mh) / outH - 0.5) / maskScale
+      for (let c = 0; c < 3; c++) out[(c * outH + y) * outW + x] = (sample(gx, gy, c) / 255 - 0.5) / 0.5
+    }
   return out
 }
 
@@ -130,17 +173,20 @@ async function ppocrLines(raw, cw, ch) {
   const dict = fs.readFileSync(path.join(base, 'ppocrv5_dict.txt'), 'utf8').split('\n').filter(s => s.length > 0)
   const session = await ort.InferenceSession.create(path.join(base, 'rec', 'rec.onnx'), { logSeverityLevel: 3 })
   const inName = session.inputNames[0], outName = session.outputNames[0]
-  const { mask, W, H } = tealMask(raw, cw, ch)
+  const { mask, W, H } = (() => {
+    const t = tealMask(raw, cw, ch, PPOCR_UPSCALE)
+    if (t.ink < MIN_TEAL_INK) {
+      console.log(`teal ink ${(t.ink * 100).toFixed(3)}% -> OTSU fallback`)
+      return otsuMask(raw, cw, ch, PPOCR_UPSCALE)
+    }
+    console.log(`teal ink ${(t.ink * 100).toFixed(3)}%`)
+    return t
+  })()
   const out = []
   for (const L of groupLines(findBoxes(mask, W, H))) {
     const stripH = L.y1 - L.y0 + 1, stripW = L.x1 - L.x0 + 1
     const outW = Math.max(32, Math.min(960, Math.round(stripW * 48 / stripH)))
-    const gray = renderStrip(mask, W, H, L, 48, outW)
-    const data = new Float32Array(3 * 48 * outW)
-    for (let c = 0; c < 3; c++)
-      for (let y = 0; y < 48; y++)
-        for (let x = 0; x < outW; x++)
-          data[(c * 48 + y) * outW + x] = (gray[y * outW + x] - 0.5) / 0.5
+    const data = renderStripColor(raw, cw, ch, PPOCR_UPSCALE, L, 48, outW)
     const feeds = {}
     feeds[inName] = new ort.Tensor('float32', data, [1, 3, 48, outW])
     const res = await session.run(feeds)
@@ -157,19 +203,25 @@ async function ppocrLines(raw, cw, ch) {
   return out
 }
 
-// ---------- pass 2: Tesseract fallback (mirror ocr.ts) ----------
-function binarizeUpscale(src, w, h) {
-  const scale = 3, W = w * scale, H = h * scale
+// ---------- pass 2: Tesseract fallback on RAW upscale (mirror ocr.ts) ----------
+function upscaleRaw(src, w, h) {
+  const scale = 2, W = w * scale, H = h * scale
   const png = new PNG({ width: W, height: H })
   for (let y = 0; y < H; y++) {
-    const sy = Math.min(h - 1, (y / scale) | 0)
+    const gy = (y + 0.5) / scale - 0.5
+    const yA = Math.max(0, Math.min(h - 1, Math.floor(gy))), yB = Math.min(h - 1, yA + 1)
+    const fy = Math.max(0, Math.min(1, gy - yA))
     for (let x = 0; x < W; x++) {
-      const sx = Math.min(w - 1, (x / scale) | 0)
-      const si = (sy * w + sx) * 4
-      const r = src[si], g = src[si + 1], b = src[si + 2]
-      const v = (g > 110 && g - r > 45 && b - r > 15) ? 0 : 255
+      const gx = (x + 0.5) / scale - 0.5
+      const xA = Math.max(0, Math.min(w - 1, Math.floor(gx))), xB = Math.min(w - 1, xA + 1)
+      const fx = Math.max(0, Math.min(1, gx - xA))
       const o = (y * W + x) * 4
-      png.data[o] = v; png.data[o + 1] = v; png.data[o + 2] = v; png.data[o + 3] = 255
+      for (let c = 0; c < 3; c++) {
+        const v00 = src[(yA * w + xA) * 4 + c], v10 = src[(yA * w + xB) * 4 + c]
+        const v01 = src[(yB * w + xA) * 4 + c], v11 = src[(yB * w + xB) * 4 + c]
+        png.data[o + c] = Math.round((v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy)
+      }
+      png.data[o + 3] = 255
     }
   }
   return PNG.sync.write(png)
@@ -199,9 +251,9 @@ function binarizeUpscale(src, w, h) {
   }
   let spots = extractSpots(lines, { ...frame, upscale })
 
-  // Pass 2: Tesseract fallback when no usable spots
+  // Pass 2: Tesseract fallback on raw upscale when no usable spots
   if (spots.length === 0) {
-    const cooked = binarizeUpscale(raw, cw, ch)
+    const cooked = upscaleRaw(raw, cw, ch)
     fs.writeFileSync(path.join(__dirname, '..', 'test-cooked.png'), cooked)
     const worker = await createWorker('eng')
     await worker.setParameters({
@@ -214,14 +266,14 @@ function binarizeUpscale(src, w, h) {
     lines = []
     for (const b of (data.blocks || [])) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) lines.push(l)
     if (lines.length === 0 && (data.text || '').trim()) {
-      const W = cw * 3, H = ch * 3
+      const W = cw * 2, H = ch * 2
       for (const t of data.text.split('\n')) {
         if (t.trim().length === 0) continue
         lines.push({ text: t, bbox: { x0: 0, y0: 0, x1: W, y1: H } })
       }
     }
     await worker.terminate()
-    upscale = 3
+    upscale = 2
     pass = 'center-crop'
     spots = extractSpots(lines, { ...frame, upscale })
   }

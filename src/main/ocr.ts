@@ -64,35 +64,36 @@ async function getWorker(): Promise<Worker> {
   return workerPromise
 }
 
-// Income popups use a distinctive bright teal fill (sampled ~57,244,188 on
-// shot1.png) over dark pipes / bright sky. Luminance-only Otsu keeps the sky
-// and fragments the thin outlined glyphs, so Tesseract sees nothing.
-// Filter by chroma instead: black-on-white where the pixel is teal-ish,
-// then 3x nearest-neighbor upscale (pure JS, no new runtime deps).
-// 3x, not 2x: at 2x Tesseract drops leading digits ("92.80K/s" -> "2.80K/s"
-// on shot2.png); at 3x both test frames read correctly. ~2x the pixels,
-// still well under a second for on-demand F9.
-function binarizeUpscale(src: Buffer, w: number, h: number): Buffer {
-  const scale = 3
+// Raw upscale for the Tesseract fallback pass: bilinear 2x of the untouched
+// crop. Tesseract does its own adaptive thresholding internally — our old
+// hard-binarized "cooked" image destroyed washed-out live thumbnails (blank
+// white page), so the engines now always read raw pixels. The mask only
+// locates strips for the PP-OCR pass, never what the text looks like.
+// (3x kept the leading 9 on files, but raw 2x reads at least as well and
+// halves the fallback time; verified on shot1/shot2.)
+function upscaleRaw(src: Buffer, w: number, h: number): Buffer {
+  const scale = 2
   const W = w * scale
   const H = h * scale
   const png = new PNG({ width: W, height: H })
   for (let y = 0; y < H; y++) {
-    const sy = Math.min(h - 1, (y / scale) | 0)
+    const gy = (y + 0.5) / scale - 0.5
+    const yA = Math.max(0, Math.min(h - 1, Math.floor(gy)))
+    const yB = Math.min(h - 1, yA + 1)
+    const fy = Math.max(0, Math.min(1, gy - yA))
     for (let x = 0; x < W; x++) {
-      const sx = Math.min(w - 1, (x / scale) | 0)
-      const si = (sy * w + sx) * 4
-      const r = src[si]
-      const g = src[si + 1]
-      const b = src[si + 2]
-      // Teal fill: high green, green well above red, blue above red.
-      // Rejects dark pipes (low saturation) and bright sky (R≈G≈B).
-      const isText = g > 110 && g - r > 45 && b - r > 15
-      const v = isText ? 0 : 255
+      const gx = (x + 0.5) / scale - 0.5
+      const xA = Math.max(0, Math.min(w - 1, Math.floor(gx)))
+      const xB = Math.min(w - 1, xA + 1)
+      const fx = Math.max(0, Math.min(1, gx - xA))
       const o = (y * W + x) * 4
-      png.data[o] = v
-      png.data[o + 1] = v
-      png.data[o + 2] = v
+      for (let c = 0; c < 3; c++) {
+        const v00 = src[(yA * w + xA) * 4 + c]
+        const v10 = src[(yA * w + xB) * 4 + c]
+        const v01 = src[(yB * w + xA) * 4 + c]
+        const v11 = src[(yB * w + xB) * 4 + c]
+        png.data[o + c] = Math.round((v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy)
+      }
       png.data[o + 3] = 255
     }
   }
@@ -229,8 +230,8 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     }
     // Fallback: raw text without layout (positions span the crop).
     if (out.length === 0 && d.text && d.text.trim().length > 0) {
-      const W = size.width * 3
-      const H = size.height * 3
+      const W = size.width * 2
+      const H = size.height * 2
       for (const t of d.text.split('\n')) {
         if (t.trim().length === 0) continue
         out.push({ text: t, bbox: { x0: 0, y0: 0, x1: W, y1: H } })
@@ -239,7 +240,10 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     return out
   }
 
-  // Single fast pass: binarized + 3x upscaled center crop.
+  // Try each crop in order (game window, then displays); each gets both
+  // engine passes on RAW pixels; first crop with spots wins.
+  // spot-raw.png always holds the crop that produced the result (or the
+  // last one tried), so a wrong-monitor read is diagnosable from disk.
   const t0 = Date.now()
 
   let lines: OcrLine[] = []
@@ -277,10 +281,11 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     upscale = PPOCR_UPSCALE
     pass = 'ppocr'
     try {
-      const { recognizeLines } = await import('./ppocr')
-      const tPp = Date.now()
-      lines = await recognizeLines(raw, size.width, size.height)
-      dbg(`ppocr in=${Date.now() - tPp}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+    const { recognizeLines } = await import('./ppocr')
+    const tPp = Date.now()
+    const res = await recognizeLines(raw, size.width, size.height)
+    lines = res.lines
+    dbg(`ppocr in=${Date.now() - tPp}ms ink=${(res.ink * 100).toFixed(2)}%${res.otsu ? ' OTSU-FALLBACK' : ''} lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
     } catch (e) {
       dbg(`ppocr failed, falling back to tesseract: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
       lines = []
@@ -288,12 +293,12 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     spots = extractSpots(lines, { ...frame, upscale })
 
     if (spots.length === 0) {
-      // Pass 2 (fallback): Tesseract on the binarized + 3x upscaled crop.
-      // Runs when pass 1 yields no usable spots — a missed rate label gets a
-      // second chance; genuine negatives just take a few seconds longer.
+      // Pass 2 (fallback): Tesseract on the RAW upscaled crop — it does its
+      // own adaptive thresholding internally. No binarized "cooked" image:
+      // hard thresholds destroyed washed-out live thumbnails (blank page).
       // Worker spins up lazily here so PP-OCR hits never pay for it.
-      const worker = await getWorker()
-      const cooked = binarizeUpscale(raw, size.width, size.height)
+    const worker = await getWorker()
+    const cooked = upscaleRaw(raw, size.width, size.height)
       try {
         await fs.writeFile(join(capDir, 'spot-cooked.png'), cooked)
       } catch {}
@@ -313,7 +318,7 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
         recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
       }).recognize(cooked, {}, { blocks: true })
       lines = linesOf((recognized as { data: unknown }).data, size)
-      upscale = 3
+      upscale = 2
       pass = 'center-crop'
       spots = extractSpots(lines, { ...frame, upscale })
     }

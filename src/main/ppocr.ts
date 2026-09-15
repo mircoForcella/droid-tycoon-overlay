@@ -60,11 +60,22 @@ async function getSession() {
   return sessionPromise
 }
 
-function tealMask(src: Buffer, w: number, h: number): { mask: Uint8Array; W: number; H: number } {
-  const scale = PPOCR_UPSCALE
-  const W = w * scale
+// Fraction of teal pixels below which the mask is declared empty (wrong
+// monitor, washed-out thumbnail). Game frames measure ~1%; a chat window
+// leaves only specks (~0.01%). Callers fall back to Otsu in that case.
+export const MIN_TEAL_INK = 0.001
+
+export interface BinaryMask {
+  mask: Uint8Array // 1 = ink (black), 0 = paper (white)
+  W: number
+  H: number
+  ink: number // fraction of ink pixels
+}
+
+export function tealMask(src: Buffer, w: number, h: number, scale: number): BinaryMask {  const W = w * scale
   const H = h * scale
   const mask = new Uint8Array(W * H)
+  let ink = 0
   for (let y = 0; y < H; y++) {
     const sy = Math.min(h - 1, (y / scale) | 0)
     for (let x = 0; x < W; x++) {
@@ -73,10 +84,63 @@ function tealMask(src: Buffer, w: number, h: number): { mask: Uint8Array; W: num
       const r = src[si]
       const g = src[si + 1]
       const b = src[si + 2]
-      mask[y * W + x] = g > 110 && g - r > 45 && b - r > 15 ? 1 : 0
+      const isText = g > 110 && g - r > 45 && b - r > 15
+      mask[y * W + x] = isText ? 1 : 0
+      ink += isText ? 1 : 0
     }
   }
-  return { mask, W, H }
+  return { mask, W, H, ink: ink / (W * H) }
+}
+
+// Luminance Otsu fallback for frames with no teal (wrong monitor, odd
+// thumbnail colors). Polarity follows the background: bright bg -> dark ink,
+// dark bg (chat UI) -> bright text becomes the ink. Either way the engines
+// get black-on-white instead of a blank page.
+export function otsuMask(src: Buffer, w: number, h: number, scale: number): BinaryMask {
+  const n = w * h
+  const lum = new Uint8Array(n)
+  for (let i = 0; i < n; i++) {
+    lum[i] = (src[i * 4] * 77 + src[i * 4 + 1] * 150 + src[i * 4 + 2] * 29) >> 8
+  }
+  const hist = new Array<number>(256).fill(0)
+  for (let i = 0; i < n; i++) hist[lum[i]]++
+  let sum = 0
+  for (let t = 0; t < 256; t++) sum += t * hist[t]
+  let sumB = 0
+  let wB = 0
+  let best = -1
+  let thresh = 128
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]
+    if (wB === 0) continue
+    const wF = n - wB
+    if (wF === 0) break
+    sumB += t * hist[t]
+    const mB = sumB / wB
+    const mF = (sum - sumB) / wF
+    const between = wB * wF * (mB - mF) * (mB - mF)
+    if (between > best) {
+      best = between
+      thresh = t
+    }
+  }
+  let bright = 0
+  for (let i = 0; i < n; i++) if (lum[i] > thresh) bright++
+  const darkBg = bright / n <= 0.5
+  const W = w * scale
+  const H = h * scale
+  const mask = new Uint8Array(W * H)
+  let ink = 0
+  for (let y = 0; y < H; y++) {
+    const sy = Math.min(h - 1, (y / scale) | 0)
+    for (let x = 0; x < W; x++) {
+      const sx = Math.min(w - 1, (x / scale) | 0)
+      const isInk = darkBg ? lum[sy * w + sx] > thresh : lum[sy * w + sx] <= thresh
+      mask[y * W + x] = isInk ? 1 : 0
+      ink += isInk ? 1 : 0
+    }
+  }
+  return { mask, W, H, ink: ink / (W * H) }
 }
 
 interface Box {
@@ -157,38 +221,52 @@ function groupLines(boxes: Box[]): Box[] {
   return lines.filter(L => L.x1 - L.x0 >= 20)
 }
 
-// Bilinear render of a mask patch to Float32 HxW ink map (1 = ink).
-function renderStrip(
-  mask: Uint8Array,
-  W: number,
-  H: number,
+// Bilinear render of a RAW COLOR patch to normalized NCHW-ready floats.
+// The engines always read unprocessed pixels now: thresholding proved lossy
+// on live thumbnails (washed teal -> blank page). The mask only decides
+// WHERE to look (boxes), never what the text looks like.
+// Box coords are in mask space (maskScale); src is the raw BGRA crop.
+function renderStripColor(
+  src: Buffer,
+  srcW: number,
+  srcH: number,
+  maskScale: number,
   L: Box,
   outH: number,
   outW: number
 ): Float32Array {
   const pad = 6
-  const x0 = Math.max(0, L.x0 - pad)
-  const y0 = Math.max(0, L.y0 - pad)
-  const x1 = Math.min(W - 1, L.x1 + pad)
-  const y1 = Math.min(H - 1, L.y1 + pad)
-  const sw = x1 - x0 + 1
-  const sh = y1 - y0 + 1
-  const out = new Float32Array(outH * outW)
+  const mx0 = Math.max(0, L.x0 - pad)
+  const my0 = Math.max(0, L.y0 - pad)
+  const mx1 = L.x1 + pad
+  const my1 = L.y1 + pad
+  const mw = mx1 - mx0 + 1
+  const mh = my1 - my0 + 1
+  const sample = (gx: number, gy: number, ch: number): number => {
+    const x = Math.max(0, Math.min(srcW - 1, gx))
+    const y = Math.max(0, Math.min(srcH - 1, gy))
+    const xA = Math.floor(x)
+    const yA = Math.floor(y)
+    const xB = Math.min(srcW - 1, xA + 1)
+    const yB = Math.min(srcH - 1, yA + 1)
+    const fx = x - xA
+    const fy = y - yA
+    const si = (yA * srcW + xA) * 4 + ch
+    const v00 = src[si]
+    const v10 = src[(yA * srcW + xB) * 4 + ch]
+    const v01 = src[(yB * srcW + xA) * 4 + ch]
+    const v11 = src[(yB * srcW + xB) * 4 + ch]
+    return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy
+  }
+  const out = new Float32Array(3 * outH * outW)
   for (let y = 0; y < outH; y++) {
-    const sy = ((y + 0.5) * sh) / outH - 0.5
-    const yA = Math.max(0, Math.min(sh - 1, Math.floor(sy)))
-    const yB = Math.min(sh - 1, yA + 1)
-    const fy = Math.max(0, Math.min(1, sy - Math.floor(sy)))
     for (let x = 0; x < outW; x++) {
-      const sx = ((x + 0.5) * sw) / outW - 0.5
-      const xA = Math.max(0, Math.min(sw - 1, Math.floor(sx)))
-      const xB = Math.min(sw - 1, xA + 1)
-      const fx = Math.max(0, Math.min(1, sx - Math.floor(sx)))
-      const v00 = mask[(y0 + yA) * W + (x0 + xA)]
-      const v10 = mask[(y0 + yA) * W + (x0 + xB)]
-      const v01 = mask[(y0 + yB) * W + (x0 + xA)]
-      const v11 = mask[(y0 + yB) * W + (x0 + xB)]
-      out[y * outW + x] = (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy
+      // Output pixel -> mask coords -> raw crop coords.
+      const gx = ((mx0 + ((x + 0.5) * mw) / outW - 0.5) / maskScale)
+      const gy = ((my0 + ((y + 0.5) * mh) / outH - 0.5) / maskScale)
+      for (let c = 0; c < 3; c++) {
+        out[(c * outH + y) * outW + x] = (sample(gx, gy, c) / 255 - 0.5) / 0.5
+      }
     }
   }
   return out
@@ -214,9 +292,19 @@ function ctcDecode(logits: Float32Array, T: number, C: number, dict: string[]): 
 }
 
 /** Recognize income-text line strips in a raw BGRA crop. Throws on any failure. */
-export async function recognizeLines(src: Buffer, w: number, h: number): Promise<PpOcrLine[]> {
+export async function recognizeLines(
+  src: Buffer,
+  w: number,
+  h: number
+): Promise<{ lines: PpOcrLine[]; ink: number; otsu: boolean }> {
   const { ort, session, dict } = await getSession()
-  const { mask, W, H } = tealMask(src, w, h)
+  let { mask, W, H, ink } = tealMask(src, w, h, PPOCR_UPSCALE)
+  let otsu = false
+  if (ink < MIN_TEAL_INK) {
+    // No teal (wrong monitor, washed-out thumbnail): Otsu instead of blank.
+    ;({ mask, W, H } = otsuMask(src, w, h, PPOCR_UPSCALE))
+    otsu = true
+  }
   const lines = groupLines(findBoxes(mask, W, H))
   const inName = session.inputNames[0]
   const outName = session.outputNames[0]
@@ -225,15 +313,9 @@ export async function recognizeLines(src: Buffer, w: number, h: number): Promise
     const stripH = L.y1 - L.y0 + 1
     const stripW = L.x1 - L.x0 + 1
     const outW = Math.max(32, Math.min(960, Math.round((stripW * 48) / stripH)))
-    const gray = renderStrip(mask, W, H, L, 48, outW)
-    const data = new Float32Array(3 * 48 * outW)
-    for (let c = 0; c < 3; c++) {
-      for (let y = 0; y < 48; y++) {
-        for (let x = 0; x < outW; x++) {
-          data[(c * 48 + y) * outW + x] = (gray[y * outW + x] - 0.5) / 0.5
-        }
-      }
-    }
+    // Raw color pixels: the mask only located the strip, the engine reads
+    // the unprocessed game frame.
+    const data = renderStripColor(src, w, h, PPOCR_UPSCALE, L, 48, outW)
     const feeds: Record<string, unknown> = {}
     feeds[inName] = new ort.Tensor('float32', data, [1, 3, 48, outW])
     const res = await session.run(feeds)
@@ -245,5 +327,5 @@ export async function recognizeLines(src: Buffer, w: number, h: number): Promise
       out.push({ text, bbox: { x0: L.x0, y0: L.y0, x1: L.x1, y1: L.y1 } })
     }
   }
-  return out
+  return { lines: out, ink, otsu }
 }
