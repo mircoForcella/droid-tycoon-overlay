@@ -72,8 +72,11 @@ export interface IncomeHit {
   income: number
 }
 
-// All droid+quality combos whose income matches within tolerance.
-export function findByIncome(value: number, tol = 0.02): IncomeHit[] {
+// All droid+quality combos whose income matches EXACTLY. Incomes are fixed
+// game values, so a non-matching read is a misread and must yield nothing —
+// never the "closest" droid. The epsilon covers float dust only
+// (parseFloat("92.80") * 1e3 is 92800.00000000001, not 92800).
+export function findByIncome(value: number, tol = 1e-9): IncomeHit[] {
   const out: IncomeHit[] = []
   for (const d of DROIDS) {
     if (d.tier === 'Iconic') continue
