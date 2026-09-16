@@ -287,6 +287,7 @@ function openSpotWindow(spots: SpotPayload[]) {
       spotWin.showInactive()
       spotWin.moveTop()
       spotWin.focus()
+      registerSpotKeys()
     } catch {}
     return
   }
@@ -337,11 +338,13 @@ function openSpotWindow(spots: SpotPayload[]) {
     spotWin.setIgnoreMouseEvents(false)
     spotWin.setFocusable(true)
     spotWin.focus()
+    registerSpotKeys()
   } catch {}
   log('spot window created')
 }
 
 function closeSpotWindow() {
+  unregisterSpotKeys()
   try {
     spotWin?.destroy()
   } catch {}
@@ -349,6 +352,36 @@ function closeSpotWindow() {
   if (spotRestoreGame) {
     spotRestoreGame = false
     setInteractive(false)
+  }
+}
+
+// Ephemeral drive for the spot window: digits pick, Enter confirms,
+// Backspace/Esc step back out. Registered only while the popup is open so
+// game keys are untouched the rest of the time.
+function registerSpotKeys() {
+  unregisterSpotKeys()
+  const fwd = (key: string) => {
+    try {
+      spotWin?.webContents.send('spot-key', key)
+    } catch {}
+  }
+  const bindings: Array<[string, string]> = [
+    ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5'],
+    ['6', '6'], ['7', '7'], ['8', '8'], ['9', '9'],
+    ['Enter', 'Enter'], ['Escape', 'Escape'], ['Backspace', 'Backspace']
+  ]
+  for (const [accel, key] of bindings) {
+    try {
+      globalShortcut.register(accel, () => fwd(key))
+    } catch {}
+  }
+}
+
+function unregisterSpotKeys() {
+  for (const accel of ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Backspace']) {
+    try {
+      globalShortcut.unregister(accel)
+    } catch {}
   }
 }
 

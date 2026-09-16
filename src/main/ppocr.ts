@@ -63,32 +63,10 @@ async function getRecSession() {
   return recPromise
 }
 
-async function getOrt(): Promise<OrtLike> {
-  const { ort } = await getRecSession()
-  return ort
-}
-
-let detPromise: Promise<{ ort: OrtLike; session: OrtSession }> | null = null
-
-async function getDetSession() {
-  if (!detPromise) {
-    detPromise = (async () => {
-      const ort = await getOrt()
-      const base = modelsBase()
-      const session = await ort.InferenceSession.create(join(base, 'det', 'det.onnx'), {
-        logSeverityLevel: 3
-      })
-      return { ort, session }
-    })()
-  }
-  return detPromise
-}
-
-// Pre-load both models + the native binding (called ~10s after launch while
+// Pre-load the recognizer + native binding (called ~10s after launch while
 // idle). F9 must never pay first-use init. Safe to call repeatedly.
 export async function warmup(): Promise<void> {
   await getRecSession()
-  await getDetSession()
 }
 
 // Fraction of teal pixels below which the mask is declared empty (wrong
@@ -371,80 +349,6 @@ async function runStrips(
     if (text.length > 0) {
       out.push({ text, bbox: { x0: L.x0, y0: L.y0, x1: L.x1, y1: L.y1 } })
     }
-  }
-  return out
-}
-
-// DB text detection on RAW pixels (color-independent). Returns line boxes in
-// 2x mask coords, same convention as the mask path.
-export async function recognizeDetected(
-  src: Buffer,
-  w: number,
-  h: number
-): Promise<{ lines: PpOcrLine[]; boxes: number }> {
-  const { ort, session: det } = await getDetSession()
-  const { session: rec, dict } = await getRecSession()
-  const boxes = await detectBoxes(ort, det, src, w, h)
-  const lines = groupLines(boxes.map(b => ({ x0: b.x0 * 2, y0: b.y0 * 2, x1: b.x1 * 2, y1: b.y1 * 2 })))
-  const out = await runStrips(ort, rec, dict, src, w, h, lines)
-  return { lines: out, boxes: boxes.length }
-}
-
-const DET_MEAN = [0.485, 0.456, 0.406]
-const DET_STD = [0.229, 0.224, 0.225]
-
-// Simplified DB postprocess: threshold the prob map, connected components,
-// expand ~1.3x (cheap unclip stand-in), drop specks. Boxes in crop coords.
-async function detectBoxes(
-  ort: OrtLike,
-  det: OrtSession,
-  src: Buffer,
-  w: number,
-  h: number
-): Promise<Box[]> {
-  // Detection boxes only locate text — recognition renders from full-res raw
-  // pixels — but the box precision itself matters: at 640px the detector
-  // merges neighboring glyphs ("92.80K/s" -> "792.80K/s" on shot1), so the
-  // cap stays 960px. Verified exact on shot1/shot2.
-  const scale = Math.min(1, 960 / Math.max(w, h))
-  let dw = Math.max(32, Math.round(w * scale))
-  let dh = Math.max(32, Math.round(h * scale))
-  // DB head broadcasts internally: spatial dims must be multiples of 32.
-  dw -= dw % 32
-  dh -= dh % 32
-  const data = new Float32Array(3 * dh * dw)
-  for (let y = 0; y < dh; y++) {
-    const sy = Math.min(h - 1, (y / scale) | 0)
-    for (let x = 0; x < dw; x++) {
-      const sx = Math.min(w - 1, (x / scale) | 0)
-      const si = (sy * w + sx) * 4
-      for (let c = 0; c < 3; c++) {
-        data[(c * dh + y) * dw + x] = (src[si + c] / 255 - DET_MEAN[c]) / DET_STD[c]
-      }
-    }
-  }
-  const inName = det.inputNames[0]
-  const outName = det.outputNames[0]
-  const feeds: Record<string, unknown> = {}
-  feeds[inName] = new ort.Tensor('float32', data, [1, 3, dh, dw])
-  const res = await det.run(feeds)
-  const prob = res[outName].data
-  const ph = res[outName].dims[2]
-  const pw = res[outName].dims[3]
-  const bmp = new Uint8Array(ph * pw)
-  for (let i = 0; i < ph * pw; i++) bmp[i] = prob[i] > 0.3 ? 1 : 0
-  const out: Box[] = []
-  for (const b of findBoxes(bmp, pw, ph)) {
-    // bitmap grid -> resized image -> crop coords, with unclip expansion
-    const cx = (((b.x0 + b.x1) / 2) * dw) / pw / scale
-    const cy = (((b.y0 + b.y1) / 2) * dh) / ph / scale
-    const bw = Math.max(1, (((b.x1 - b.x0 + 1) * dw) / pw / scale) * 1.15)
-    const bh = Math.max(1, (((b.y1 - b.y0 + 1) * dh) / ph / scale) * 1.35)
-    const x0 = Math.max(0, Math.floor(cx - bw / 2))
-    const y0 = Math.max(0, Math.floor(cy - bh / 2))
-    const x1 = Math.min(w - 1, Math.ceil(cx + bw / 2))
-    const y1 = Math.min(h - 1, Math.ceil(cy + bh / 2))
-    if (x1 - x0 + 1 >= 12 && y1 - y0 + 1 >= 10) out.push({ x0, y0, x1, y1 })
   }
   return out
 }

@@ -310,25 +310,7 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     spots = extractSpots(lines, { ...frame, upscale })
 
     if (spots.length === 0) {
-      // Pass 2: PP-OCRv5 DETECTION on raw pixels (color-independent).
-      // Finds text by shape where the teal mask finds nothing (washed-out
-      // live thumbnails); recognition still reads raw color strips.
-      try {
-        const { recognizeDetected } = await import('./ppocr')
-        const tDet = Date.now()
-        const det = await recognizeDetected(raw, size.width, size.height)
-        lines = det.lines
-        pass = 'ppocr-det'
-        dbg(`ppocr-det in=${Date.now() - tDet}ms boxes=${det.boxes} lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
-      } catch (e) {
-        dbg(`ppocr-det failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
-        lines = []
-      }
-      spots = extractSpots(lines, { ...frame, upscale })
-    }
-
-    if (spots.length === 0) {
-      // Pass 2 (fallback): Tesseract on the RAW upscaled crop — it does its
+      // Fallback: Tesseract on the RAW upscaled crop — it does its
       // own adaptive thresholding internally. No second debug file: spot.png
       // above is already the exact frame being read.
       // Worker spins up lazily here so PP-OCR hits never pay for it.

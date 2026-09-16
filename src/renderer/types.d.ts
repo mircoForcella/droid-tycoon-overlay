@@ -30,6 +30,7 @@ declare global {
       openSpotWindow: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => Promise<void>
       getSpotData: () => Promise<Array<{ text: string; value: number; rx: number; ry: number }>>
       onSpotData: (cb: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => void) => () => void
+      onSpotKey: (cb: (key: string) => void) => () => void
       spotPlace: (payload: { droidId: string; quality: string; station: string }) => Promise<{ ok: boolean; message: string }>
       spotClose: () => void
       onSpotPlaceRequest: (cb: (req: { droidId: string; quality: string; station: string; reqId: number }) => void) => () => void

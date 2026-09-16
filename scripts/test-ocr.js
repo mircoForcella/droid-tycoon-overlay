@@ -203,80 +203,6 @@ async function ppocrLines(raw, cw, ch) {
   return out
 }
 
-const DET_MEAN = [0.485, 0.456, 0.406]
-const DET_STD = [0.229, 0.224, 0.225]
-let _detSession = null, _recShared = null
-
-// DB detection on raw pixels -> boxes in crop coords. Mirror of ppocr.ts.
-async function detectBoxes(ort, det, raw, cw, ch) {
-  const scale = Math.min(1, 960 / Math.max(cw, ch))
-  let dw = Math.max(32, Math.round(cw * scale)), dh = Math.max(32, Math.round(ch * scale))
-  // DB head broadcasts internally: spatial dims must be multiples of 32.
-  dw -= dw % 32
-  dh -= dh % 32
-  const data = new Float32Array(3 * dh * dw)
-  for (let y = 0; y < dh; y++) {
-    const sy = Math.min(ch - 1, Math.round(y / scale))
-    for (let x = 0; x < dw; x++) {
-      const sx = Math.min(cw - 1, Math.round(x / scale))
-      const si = (sy * cw + sx) * 4
-      for (let c = 0; c < 3; c++) data[(c * dh + y) * dw + x] = (raw[si + c] / 255 - DET_MEAN[c]) / DET_STD[c]
-    }
-  }
-  const feeds = {}
-  feeds[det.inputNames[0]] = new ort.Tensor('float32', data, [1, 3, dh, dw])
-  const res = await det.run(feeds)
-  const t = res[det.outputNames[0]]
-  const ph = t.dims[2], pw = t.dims[3]
-  const bmp = new Uint8Array(ph * pw)
-  for (let i = 0; i < ph * pw; i++) bmp[i] = t.data[i] > 0.3 ? 1 : 0
-  const out = []
-  for (const b of findBoxes(bmp, pw, ph)) {
-    const cx = (((b.x0 + b.x1) / 2) * dw) / pw / scale
-    const cy = (((b.y0 + b.y1) / 2) * dh) / ph / scale
-    const bw = Math.max(1, (((b.x1 - b.x0 + 1) * dw) / pw / scale) * 1.15)
-    const bh = Math.max(1, (((b.y1 - b.y0 + 1) * dh) / ph / scale) * 1.35)
-    const x0 = Math.max(0, Math.floor(cx - bw / 2)), y0 = Math.max(0, Math.floor(cy - bh / 2))
-    const x1 = Math.min(cw - 1, Math.ceil(cx + bw / 2)), y1 = Math.min(ch - 1, Math.ceil(cy + bh / 2))
-    if (x1 - x0 + 1 >= 12 && y1 - y0 + 1 >= 10) out.push({ x0, y0, x1, y1 })
-  }
-  return out
-}
-
-async function ppocrDetected(raw, cw, ch) {
-  const ort = require('onnxruntime-node')
-  const base = path.join(__dirname, '..', 'ocr-models', 'ppocrv5')
-  if (!_detSession) {
-    _detSession = await ort.InferenceSession.create(path.join(base, 'det', 'det.onnx'), { logSeverityLevel: 3 })
-    const dict = fs.readFileSync(path.join(base, 'ppocrv5_dict.txt'), 'utf8').split('\n').filter(s => s.length > 0)
-    const rec = await ort.InferenceSession.create(path.join(base, 'rec', 'rec.onnx'), { logSeverityLevel: 3 })
-    _recShared = { rec, dict }
-  }
-  const boxes = await detectBoxes(ort, _detSession, raw, cw, ch)
-  console.log(`det boxes=${boxes.length}`)
-  const out = []
-  // same 2x convention as mask path: scale boxes, group, recognize raw strips
-  const lines = groupLines(boxes.map(b => ({ x0: b.x0 * 2, y0: b.y0 * 2, x1: b.x1 * 2, y1: b.y1 * 2 })))
-  for (const L of lines) {
-    const stripH = L.y1 - L.y0 + 1, stripW = L.x1 - L.x0 + 1
-    const outW = Math.max(32, Math.min(960, Math.round(stripW * 48 / stripH)))
-    const data = renderStripColor(raw, cw, ch, PPOCR_UPSCALE, L, 48, outW)
-    const feeds = {}
-    feeds[_recShared.rec.inputNames[0]] = new ort.Tensor('float32', data, [1, 3, 48, outW])
-    const res = await _recShared.rec.run(feeds)
-    const t = res[_recShared.rec.outputNames[0]], T = t.dims[1], C = t.dims[2]
-    let text = '', prev = -1
-    for (let s = 0; s < T; s++) {
-      let best = 0, bv = -Infinity
-      for (let c = 0; c < C; c++) { const v = t.data[s * C + c]; if (v > bv) { bv = v; best = c } }
-      if (best !== 0 && best !== prev) text += _recShared.dict[best - 1] ?? ''
-      prev = best
-    }
-    if (text.length > 0) out.push({ text, bbox: { x0: L.x0, y0: L.y0, x1: L.x1, y1: L.y1 } })
-  }
-  return out
-}
-
 // ---------- pass 2: Tesseract fallback on RAW upscale (mirror ocr.ts) ----------
 function upscaleRaw(src, w, h) {
   const scale = 2, W = w * scale, H = h * scale
@@ -313,16 +239,11 @@ function upscaleRaw(src, w, h) {
   console.log(`crop ${cw}x${ch} at ${cx},${cy}`)
   const frame = { frameW: img.width, frameH: img.height, originX: cx, originY: cy }
 
-  // Pass 1: PP-OCRv5 teal-mask strips (DET_FIRST=1 forces the det path, dev only)
+  // Pass 1: PP-OCRv5 teal-mask strips, raw color read
   let lines = [], upscale = PPOCR_UPSCALE, pass = 'ppocr'
   try {
     const t0 = Date.now()
-    if (process.env.DET_FIRST === '1') {
-      lines = await ppocrDetected(raw, cw, ch)
-      pass = 'ppocr-det'
-    } else {
-      lines = await ppocrLines(raw, cw, ch)
-    }
+    lines = await ppocrLines(raw, cw, ch)
     console.log(`${pass} in=${Date.now() - t0}ms lines=${lines.length}`)
   } catch (e) {
     console.log('ppocr failed, falling back: ' + String(e.message || e).slice(0, 160))
@@ -330,21 +251,7 @@ function upscaleRaw(src, w, h) {
   }
   let spots = extractSpots(lines, { ...frame, upscale })
 
-  // Pass 2: PP-OCRv5 detection on raw pixels (color-independent)
-  if (spots.length === 0 && process.env.DET_FIRST !== '1') {
-    try {
-      const t0 = Date.now()
-      lines = await ppocrDetected(raw, cw, ch)
-      pass = 'ppocr-det'
-      console.log(`ppocr-det in=${Date.now() - t0}ms lines=${lines.length}`)
-    } catch (e) {
-      console.log('ppocr-det failed: ' + String(e.message || e).slice(0, 120))
-      lines = []
-    }
-    spots = extractSpots(lines, { ...frame, upscale })
-  }
-
-  // Pass 3: Tesseract fallback on raw upscale when no usable spots
+  // Pass 2: Tesseract fallback on raw upscale when no usable spots
   if (spots.length === 0) {
     const cooked = upscaleRaw(raw, cw, ch)
     fs.writeFileSync(path.join(__dirname, '..', 'test-cooked.png'), cooked)

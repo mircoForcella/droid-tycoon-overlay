@@ -64,6 +64,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSpotData: (callback: (spots: Array<{ text: string; value: number; rx: number; ry: number }>) => void): Unsub => {
     return sub('spot-data', (_, spots: Array<{ text: string; value: number; rx: number; ry: number }>) => callback(spots))
   },
+  onSpotKey: (callback: (key: string) => void): Unsub => {
+    return sub('spot-key', (_, key: string) => callback(key))
+  },
   spotPlace: (payload: { droidId: string; quality: string; station: string }) => ipcRenderer.invoke('spot-place', payload),
   spotClose: () => ipcRenderer.send('spot-close'),
   onSpotPlaceRequest: (callback: (req: { droidId: string; quality: string; station: string; reqId: number }) => void): Unsub => {

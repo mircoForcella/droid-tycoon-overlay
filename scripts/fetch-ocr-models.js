@@ -9,7 +9,6 @@ const https = require('https')
 const BASE = 'https://raw.githubusercontent.com/SotaTne/OnnxOcrJS/main/models/ppocrv5'
 const FILES = [
   { url: `${BASE}/rec/rec.onnx`, dest: 'rec/rec.onnx', minBytes: 10_000_000 },
-  { url: `${BASE}/det/det.onnx`, dest: 'det/det.onnx', minBytes: 1_000_000 },
   { url: `${BASE}/ppocrv5_dict.txt`, dest: 'ppocrv5_dict.txt', minBytes: 10_000 }
 ]
 
