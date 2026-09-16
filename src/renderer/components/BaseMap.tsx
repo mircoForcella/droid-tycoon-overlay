@@ -134,7 +134,7 @@ export function DroidPickerModal({ isOpen, onClose, onSelect, category }: {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }} onKeyDown={onGridKey}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }} onKeyDown={onGridKey}>
         <h3 className="modal-title">Select Droid — {category} <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>(↑↓ + Enter)</span></h3>
         <input
           id="picker-search"

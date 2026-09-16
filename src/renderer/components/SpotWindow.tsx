@@ -168,8 +168,8 @@ export function SpotWindow() {
                 const picked = hitIdx === i
                 return (
                   <button key={`${h.def.id}-${h.quality}`} onClick={() => pickCard(i)}
-                    className={`rebirth-card spot-card${picked ? ' spot-pick' : ''}`}
-                    style={{ width: 150 }} title={`${h.def.name} (${h.quality})`}>
+                      className={`rebirth-card spot-card${picked ? ' spot-pick' : ''}`}
+                      style={{ width: 180 }} title={`${h.def.name} (${h.quality})`}>
                     {card ? (
                       <img src={card} alt={h.def.name} className="rebirth-card-bg" loading="lazy" />
                     ) : (
