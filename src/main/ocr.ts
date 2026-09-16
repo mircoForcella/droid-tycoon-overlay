@@ -310,10 +310,27 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
     spots = extractSpots(lines, { ...frame, upscale })
 
     if (spots.length === 0) {
-      // Fallback: Tesseract on the RAW upscaled crop — it does its
+      // Pass 2: glyph template matching (no ML). Reference glyphs cut from
+      // user-confirmed frames live in ocr-glyphs/; '?' marks anything below
+      // threshold so parsers reject the line instead of misreading it.
+      try {
+        const { matchLines } = await import('./glyphs')
+        const tT = Date.now()
+        lines = await matchLines(raw, size.width, size.height)
+        pass = 'glyphs'
+        dbg(`glyphs in=${Date.now() - tT}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+      } catch (e) {
+        dbg(`glyphs failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
+        lines = []
+      }
+      spots = extractSpots(lines, { ...frame, upscale })
+    }
+
+    if (spots.length === 0) {
+      // Pass 3 (fallback): Tesseract on the RAW upscaled crop — it does its
       // own adaptive thresholding internally. No second debug file: spot.png
       // above is already the exact frame being read.
-      // Worker spins up lazily here so PP-OCR hits never pay for it.
+      // Worker spins up lazily here so earlier hits never pay for it.
     const worker = await getWorker()
     const cooked = upscaleRaw(raw, size.width, size.height)
       // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats

@@ -203,7 +203,123 @@ async function ppocrLines(raw, cw, ch) {
   return out
 }
 
-// ---------- pass 2: Tesseract fallback on RAW upscale (mirror ocr.ts) ----------
+// ---------- glyph template pass (mirror glyphs.ts) ----------
+const GLYPH_THRESHOLD = 0.7
+let _glyphs = null
+function loadGlyphs() {
+  if (_glyphs) return _glyphs
+  const base = path.join(__dirname, '..', 'ocr-glyphs')
+  const manifest = JSON.parse(fs.readFileSync(path.join(base, 'manifest.json'), 'utf8'))
+  const byChar = new Map()
+  for (const m of manifest) {
+    const p = PNG.sync.read(fs.readFileSync(path.join(base, m.file)))
+    const g = new Float32Array(p.width * p.height)
+    for (let i = 0; i < p.width * p.height; i++) g[i] = (p.data[i * 4] + p.data[i * 4 + 1] + p.data[i * 4 + 2]) / 3
+    if (!byChar.has(m.char)) byChar.set(m.char, [])
+    byChar.get(m.char).push({ g, w: p.width, h: p.height })
+  }
+  if (byChar.size === 0) throw new Error('no glyph templates')
+  _glyphs = byChar
+  return byChar
+}
+function resizeGray(g, w, h, W, H) {
+  const out = new Float32Array(W * H)
+  for (let y = 0; y < H; y++) {
+    const sy = Math.min(h - 1, Math.max(0, (y + 0.5) * h / H - 0.5))
+    const yA = Math.floor(sy), yB = Math.min(h - 1, yA + 1), fy = sy - yA
+    for (let x = 0; x < W; x++) {
+      const sx = Math.min(w - 1, Math.max(0, (x + 0.5) * w / W - 0.5))
+      const xA = Math.floor(sx), xB = Math.min(w - 1, xA + 1), fx = sx - xA
+      out[y * W + x] =
+        (g[yA * w + xA] * (1 - fx) + g[yA * w + xB] * fx) * (1 - fy) +
+        (g[yB * w + xA] * (1 - fx) + g[yB * w + xB] * fx) * fy
+    }
+  }
+  return out
+}
+function ncc(a, b) {
+  const n = a.length
+  let ma = 0, mb = 0
+  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i] }
+  ma /= n; mb /= n
+  let sab = 0, saa = 0, sbb = 0
+  for (let i = 0; i < n; i++) { const da = a[i] - ma, db = b[i] - mb; sab += da * db; saa += da * da; sbb += db * db }
+  if (saa < 1e-9 || sbb < 1e-9) return -1
+  return sab / Math.sqrt(saa * sbb)
+}
+function splitGlyphs(mask, W, line) {
+  const counts = []
+  for (let x = line.x0; x <= line.x1; x++) {
+    let c = 0
+    for (let y = line.y0; y <= line.y1; y++) c += mask[y * W + x]
+    counts.push(c)
+  }
+  const segs = []
+  let sx = -1
+  const flush = (ex) => {
+    if (sx >= 0 && ex - sx + 1 >= 6) segs.push({ x0: line.x0 + sx, x1: line.x0 + ex, y0: line.y0, y1: line.y1 })
+    sx = -1
+  }
+  counts.forEach((c, i) => { if (c <= 3) flush(i - 1); else if (sx < 0) sx = i })
+  flush(counts.length - 1)
+  const kept = segs.filter(s => {
+    let peak = 0
+    for (let x = s.x0; x <= s.x1; x++) peak = Math.max(peak, counts[x - line.x0])
+    return s.x1 - s.x0 + 1 >= 8 || peak >= 5
+  })
+  const splitSeg = (s) => {
+    let peak = 0
+    for (let x = s.x0; x <= s.x1; x++) peak = Math.max(peak, counts[x - line.x0])
+    let bi = -1, bv = Infinity
+    for (let x = s.x0; x <= s.x1; x++) { const c = counts[x - line.x0]; if (c < bv) { bv = c; bi = x } }
+    if (bi > 0 && bv < peak * 0.3 && bi - s.x0 + 1 >= 10 && s.x1 - bi >= 10) {
+      const out = []
+      for (const sub of [{ x0: s.x0, x1: bi }, { x0: bi + 1, x1: s.x1 }]) {
+        if (sub.x1 - sub.x0 + 1 >= 24) out.push(...splitSeg({ ...sub, y0: s.y0, y1: s.y1 }))
+        else out.push({ ...sub, y0: s.y0, y1: s.y1 })
+      }
+      return out
+    }
+    return [s]
+  }
+  const parts = []
+  for (const s of kept) for (const p of splitSeg(s)) parts.push(p)
+  return parts.sort((a, b) => a.x0 - b.x0)
+}
+function matchGlyphLines(raw, cw, ch) {
+  const byChar = loadGlyphs()
+  let tm = tealMask(raw, cw, ch, PPOCR_UPSCALE)
+  if (tm.ink < MIN_TEAL_INK) {
+    const o = otsuMask(raw, cw, ch, PPOCR_UPSCALE)
+    tm = o
+  }
+  const out = []
+  for (const line of groupLines(findBoxes(tm.mask, tm.W, tm.H))) {
+    let text = ''
+    for (const gbox of splitGlyphs(tm.mask, tm.W, line)) {
+      const x0 = gbox.x0 / PPOCR_UPSCALE, y0 = gbox.y0 / PPOCR_UPSCALE
+      const gw = (gbox.x1 - gbox.x0 + 1) / PPOCR_UPSCALE, gh = (gbox.y1 - gbox.y0 + 1) / PPOCR_UPSCALE
+      const iw = Math.max(2, Math.round(gw)), ih = Math.max(2, Math.round(gh))
+      const obs = new Float32Array(iw * ih)
+      for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) {
+        const sx = Math.max(0, Math.min(cw - 1, Math.round(x0 + (x + 0.5) * (gw / iw))))
+        const sy = Math.max(0, Math.min(ch - 1, Math.round(y0 + (y + 0.5) * (gh / ih))))
+        const si = (sy * cw + sx) * 4
+        obs[y * iw + x] = (raw[si] + raw[si + 1] + raw[si + 2]) / 3
+      }
+      let best = '?', bs = GLYPH_THRESHOLD
+      for (const [ch, list] of byChar) {
+        for (const t of list) {
+          const s = ncc(obs, resizeGray(t.g, t.w, t.h, iw, ih))
+          if (s > bs) { bs = s; best = ch }
+        }
+      }
+      text += best
+    }
+    if (text.length > 0) out.push({ text, bbox: { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 } })
+  }
+  return out
+}
 function upscaleRaw(src, w, h) {
   const scale = 2, W = w * scale, H = h * scale
   const png = new PNG({ width: W, height: H })
@@ -251,7 +367,21 @@ function upscaleRaw(src, w, h) {
   }
   let spots = extractSpots(lines, { ...frame, upscale })
 
-  // Pass 2: Tesseract fallback on raw upscale when no usable spots
+  // Glyph template pass (mirror ocr.ts): reference glyphs decide ties.
+  if (spots.length === 0) {
+    try {
+      const t0 = Date.now()
+      lines = matchGlyphLines(raw, cw, ch)
+      pass = 'glyphs'
+      console.log(`glyphs in=${Date.now() - t0}ms lines=${lines.length}`)
+    } catch (e) {
+      console.log('glyphs failed: ' + String(e.message || e).slice(0, 120))
+      lines = []
+    }
+    spots = extractSpots(lines, { ...frame, upscale })
+  }
+
+  // Pass 3: Tesseract fallback on raw upscale when no usable spots
   if (spots.length === 0) {
     const cooked = upscaleRaw(raw, cw, ch)
     fs.writeFileSync(path.join(__dirname, '..', 'test-cooked.png'), cooked)

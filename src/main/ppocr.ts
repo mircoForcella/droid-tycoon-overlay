@@ -159,7 +159,9 @@ interface Box {
   y1: number
 }
 
-function findBoxes(mask: Uint8Array, W: number, H: number): Box[] {
+export type { Box }
+
+export function findBoxes(mask: Uint8Array, W: number, H: number): Box[] {
   const seen = new Uint8Array(W * H)
   const boxes: Box[] = []
   const stack: number[] = []
@@ -205,7 +207,7 @@ function findBoxes(mask: Uint8Array, W: number, H: number): Box[] {
   return boxes
 }
 
-function groupLines(boxes: Box[]): Box[] {
+export function groupLines(boxes: Box[]): Box[] {
   const sorted = [...boxes].sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0)
   const lines: Array<Box & { cy: number }> = []
   for (const b of sorted) {
