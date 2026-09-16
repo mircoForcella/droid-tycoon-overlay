@@ -114,7 +114,7 @@ export const useStore = create<AppState>()(
       setPanelSize: (v) => set({ panelSize: v }),
       // Manual drag-resize overrides (null = follow the S/M/L preset).
       panelW: null,
-      setPanelW: (v) => set({ panelW: v === null ? null : Math.max(260, Math.min(640, Math.round(v))) }),
+      setPanelW: (v) => set({ panelW: v === null ? null : Math.max(260, Math.min(720, Math.round(v))) }),
       panelH: null,
       setPanelH: (v) => set({ panelH: v === null ? null : Math.max(280, Math.round(v)) }),
       liveScan: false,

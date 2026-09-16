@@ -344,7 +344,7 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
   color: #111;
 }
 .tier-common { background: #d9d9d9; }
-.tier-rare { background: #2f9df0; }
+.tier-rare { background: #1e88e5; }
 .tier-epic { background: #671fae; }
 .tier-legendary { background: #f5820b; }
 .tier-mythic { background: #f0227e; }

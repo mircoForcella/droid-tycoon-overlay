@@ -22,7 +22,7 @@ function App() {
   const panelSize = useStore(s => s.panelSize ?? 'M')
   const customW = useStore(s => s.panelW)
   const customH = useStore(s => s.panelH)
-  const panelWidth = customW ?? (panelSize === 'S' ? 300 : panelSize === 'L' ? 420 : 350)
+  const panelWidth = customW ?? (panelSize === 'S' ? 340 : panelSize === 'L' ? 480 : 400)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   // Manual drag-resize: left edge = width, bottom edge = height.
@@ -40,7 +40,7 @@ function App() {
     const startH = el.offsetHeight
     const onMove = (ev: MouseEvent) => {
       if (mode === 'w') {
-        const w = Math.max(260, Math.min(640, Math.round(startW + startX - ev.clientX)))
+        const w = Math.max(260, Math.min(720, Math.round(startW + startX - ev.clientX)))
         el.style.width = `${w}px`
       } else {
         const maxH = Math.round(window.innerHeight * 0.95)
@@ -52,7 +52,7 @@ function App() {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       if (mode === 'w') {
-        useStore.getState().setPanelW(Math.max(260, Math.min(640, Math.round(startW + startX - ev.clientX))))
+        useStore.getState().setPanelW(Math.max(260, Math.min(720, Math.round(startW + startX - ev.clientX))))
       } else {
         const maxH = Math.round(window.innerHeight * 0.95)
         useStore.getState().setPanelH(Math.max(280, Math.min(maxH, Math.round(startH + ev.clientY - startY))))

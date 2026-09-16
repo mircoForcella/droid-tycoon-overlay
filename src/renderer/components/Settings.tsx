@@ -96,7 +96,7 @@ export function Settings() {
             <button
               key={s}
               onClick={() => { useStore.getState().setPanelSize(s); useStore.getState().setPanelW(null) }}
-              title={s === 'S' ? 'Small (300px)' : s === 'M' ? 'Medium (350px)' : 'Large (420px)'}
+              title={s === 'S' ? 'Small (340px)' : s === 'M' ? 'Medium (400px)' : 'Large (480px)'}
               style={{
                 padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 700,
                 background: panelSize === s ? 'var(--gold)' : 'transparent',
@@ -108,7 +108,7 @@ export function Settings() {
         </span>
       </div>
       <div style={{fontSize: 11, color: 'var(--text-dim)', marginBottom: 16}}>
-        Small (300px) covers the least game. Medium (350px) is the new default. Large (420px) is the old size.
+        Small (340px) covers the least game. Medium (400px) is the new default. Large (480px) is the old size.
         You can also drag the panel's left edge (width) or bottom edge (height) directly — S/M/L jump back to presets.
         {(hasCustomSize) && (
           <button className="icon-btn" style={{ width: 'auto', padding: '2px 10px', fontSize: 11, marginLeft: 8 }}
