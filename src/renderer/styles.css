@@ -253,7 +253,7 @@ body { background: transparent; color: var(--text); }
 }
 .rebirth-card-name {
   align-self: center;
-  font-size: max(10px, 7cqi);
+  font-size: max(11px, 7.5cqi);
   font-weight: 800;
   line-height: 1.2;
   color: #fff;
@@ -266,7 +266,7 @@ body { background: transparent; color: var(--text); }
 }
 .rebirth-card-sub {
   display: inline-block;
-  font-size: max(8px, 4.6cqi);
+  font-size: max(9px, 5cqi);
   font-weight: 600;
   color: #f2ecdc;
   background: rgba(0,0,0,0.68);
@@ -277,7 +277,7 @@ body { background: transparent; color: var(--text); }
 }
 .rebirth-card-sell {
   display: inline-block;
-  font-size: max(8px, 5cqi);
+  font-size: max(9px, 5cqi);
   font-weight: 800;
   color: var(--gold);
   background: rgba(0,0,0,0.72);
@@ -287,14 +287,14 @@ body { background: transparent; color: var(--text); }
   margin-bottom: 3px;
 }
 .rebirth-card .tier, .rebirth-card .paint {
-  font-size: max(8px, 4.6cqi);
+  font-size: max(9px, 5cqi);
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .rebirth-card-flag {
-  font-size: max(7px, 4cqi);
+  font-size: max(8px, 4.5cqi);
   font-weight: 800;
   letter-spacing: 0.3px;
   color: #fff;
@@ -329,7 +329,7 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
    the game renders them. NOTE: paint GOLD (#E5A100, darker) and paint
    STELLAR (#FFE14D, light yellow, not cream) are deliberately distinct
    from each other and from the --gold UI chrome (#ffc832). */
-.paint { font-weight: 800; font-style: italic; letter-spacing: 0.4px; -webkit-text-stroke: 1px #fff; paint-order: stroke fill; }
+.paint { font-weight: 800; font-style: italic; letter-spacing: 0.4px; -webkit-text-stroke: 0.75px #fff; paint-order: stroke fill; }
 .paint-default { color: #ffffff; }
 .paint-gold { color: #e5a100; }
 .paint-diamond { color: #33d7e8; }
