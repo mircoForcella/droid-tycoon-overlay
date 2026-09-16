@@ -45,18 +45,6 @@ function UpdatesSection() {
   )
 }
 
-// Live preview of the floating timer style — same store, same render,
-// so the slider feedback is instant with no IPC round-trip involved.
-function TimerPreview() {
-  const opacity = useStore(s => s.timerBgOpacity)
-  return (
-    <span className="timer-chip galactic" style={{ backgroundColor: `rgba(0,0,0,${opacity / 100})` }}>
-      <span className="timer-chip-name">Prev</span>
-      <span className="timer-chip-value">12:34</span>
-    </span>
-  )
-}
-
 export function Settings() {
   const { clickThrough, setClickThrough, clearAll } = useStore()
   const overlayDisplay = useStore(s => s.overlayDisplay)
@@ -138,10 +126,9 @@ export function Settings() {
           onChange={e => useStore.getState().setTimerBgOpacity(Number(e.target.value))}
           style={{ width: 120, accentColor: 'var(--gold)' }}
         />
-        <TimerPreview />
       </div>
       <div style={{fontSize: 11, color: 'var(--text-dim)', marginBottom: 16}}>
-        Neutral black fill inside the 3 rectangles only — border and font keep tier colors. Preview updates live here.
+        No preview here — set a value, go back to the game (F2), and judge it on the real timers.
       </div>
 
       <div className="section-title" style={{ marginTop: 20 }}>Updates</div>

@@ -39,9 +39,9 @@ body { background: transparent; color: var(--text); }
 }
 
 /* Panel frame doubles as the mode indicator (no header bar):
-   gold = game mode (clicks pass through), light green = panel interactive. */
-.overlay-panel.mode-game { border: 2px solid var(--gold); }
-.overlay-panel.mode-panel { border: 2px solid #90ee90; box-shadow: 0 0 14px rgba(144, 238, 144, 0.35), var(--shadow); }
+   gold = game mode (clicks pass through), vivid green = panel interactive. */
+.overlay-panel.mode-game { border: 3px solid var(--gold); }
+.overlay-panel.mode-panel { border: 3px solid #00e676; box-shadow: 0 0 14px rgba(0, 230, 118, 0.4), var(--shadow); }
 
 .panel-title { font-weight: 700; font-size: 14px; letter-spacing: 0.5px; color: var(--gold); text-transform: uppercase; }
 
@@ -210,6 +210,7 @@ body { background: transparent; color: var(--text); }
   min-height: 132px;
   text-align: center;
   background: #000;
+  container-type: inline-size;
 }
 .rebirth-card-bg {
   position: absolute;
@@ -243,7 +244,7 @@ body { background: transparent; color: var(--text); }
 }
 .rebirth-card-name {
   align-self: center;
-  font-size: 11px;
+  font-size: max(10px, 7cqi);
   font-weight: 800;
   line-height: 1.2;
   color: #fff;
@@ -256,7 +257,7 @@ body { background: transparent; color: var(--text); }
 }
 .rebirth-card-sub {
   display: inline-block;
-  font-size: 10px;
+  font-size: max(8px, 4.6cqi);
   font-weight: 600;
   color: #f2ecdc;
   background: rgba(0,0,0,0.68);
@@ -267,7 +268,7 @@ body { background: transparent; color: var(--text); }
 }
 .rebirth-card-sell {
   display: inline-block;
-  font-size: 10px;
+  font-size: max(8px, 5cqi);
   font-weight: 800;
   color: var(--gold);
   background: rgba(0,0,0,0.72);
@@ -276,8 +277,15 @@ body { background: transparent; color: var(--text); }
   text-shadow: 0 1px 3px #000;
   margin-bottom: 3px;
 }
+.rebirth-card .tier, .rebirth-card .paint {
+  font-size: max(8px, 4.6cqi);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .rebirth-card-flag {
-  font-size: 9px;
+  font-size: max(7px, 4cqi);
   font-weight: 800;
   letter-spacing: 0.3px;
   color: #fff;
@@ -305,8 +313,6 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
 .spot-card .rebirth-card-sub { font-size: 11px; }
 .spot-card .rebirth-card-sell { font-size: 12px; }
 .spot-card { border-width: 2px; border-color: rgba(255,255,255,0.35); min-height: 160px; }
-.spot-card .rebirth-card-name { font-size: 14px; padding: 3px 9px; }
-.spot-card .tier, .spot-card .paint { font-size: 10px; }
 .spot-card.spot-pick { border-color: var(--gold); outline: 3px solid var(--gold); outline-offset: -1px; transform: scale(1.12); z-index: 1; }
 
 /* Game-accurate paint + rarity styling (from in-game reference shots).
@@ -314,7 +320,7 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
    the game renders them. NOTE: paint GOLD (#E5A100, darker) and paint
    STELLAR (#FFE14D, light yellow, not cream) are deliberately distinct
    from each other and from the --gold UI chrome (#ffc832). */
-.paint { font-weight: 800; font-style: italic; letter-spacing: 0.4px; }
+.paint { font-weight: 800; font-style: italic; letter-spacing: 0.4px; -webkit-text-stroke: 1px #fff; paint-order: stroke fill; }
 .paint-default { color: #ffffff; }
 .paint-gold { color: #e5a100; }
 .paint-diamond { color: #33d7e8; }
@@ -326,7 +332,8 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
 }
 .paint-beskar { color: #9ba1a6; }
 .paint-galactic { color: #b45cff; }
-.paint-stellar { color: #ffe14d; }
+.paint-stellar { color: #ffe14d; -webkit-text-stroke-color: #111; }
+.paint-default { color: #fff; -webkit-text-stroke-color: #111; }
 .tier {
   display: inline-block;
   padding: 0 8px;
@@ -337,7 +344,7 @@ button.rebirth-card { appearance: none; padding: 0; font-family: inherit; cursor
   color: #111;
 }
 .tier-common { background: #d9d9d9; }
-.tier-rare { background: #7fd0f0; }
+.tier-rare { background: #2f9df0; }
 .tier-epic { background: #671fae; }
 .tier-legendary { background: #f5820b; }
 .tier-mythic { background: #f0227e; }
