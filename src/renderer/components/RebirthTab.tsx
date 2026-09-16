@@ -66,9 +66,11 @@ export function RebirthTab() {
 
   // Safe sellers: every roster droid of the tier with no requirement at or
   // after progress in this path — including droids the path never needs at
-  // all ("useless" ones). Paint is irrelevant, one row per droid, never Iconic.
+  // all ("useless" ones). Fusion-result droids are never sell candidates
+  // (17 of them), so they're excluded outright. Paint is irrelevant, one
+  // row per droid, never Iconic.
   const sellList = isSellQuery
-    ? DROIDS.filter(def => def.tier !== 'Iconic')
+    ? DROIDS.filter(def => def.tier !== 'Iconic' && !def.fusion)
         .filter(def => sellTier === 'any' || def.tier.toLowerCase() === sellTier)
         .filter(def => !data.steps.some(s => s.n >= progress && s.requires.some(r => r.droidId === def.id)))
         .sort((a, b) => a.name.localeCompare(b.name))
