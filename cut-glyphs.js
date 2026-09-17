@@ -150,26 +150,46 @@ for (const { file, lines } of SHOTS) {
     if (parts.length > assign.length) {
       console.log(`  "${want}": assigning leading ${assign.length}, skipping ${parts.length - assign.length} trailing (merged) box(es)`)
     }
-    assign.split('').forEach((ch, i) => {
-      const g = parts[i]
-      // raw grayscale tight crop in CROP coords
+    // Raw COLOR tight crop in CROP coords (opaque). Color is preserved so the
+    // matcher applies the IDENTICAL chroma fill rule on template pixels and
+    // live-mask pixels — same fill definition, self-match mismatch ≈ 0.
+    // Grayscale would force a second threshold and re-introduce
+    // outline-vs-fill disagreement.
+    // All harvests come from the teal fill mask => set 'mint'. Dimensions in
+    // the name: the same char repeats at different UI scales (rate strips
+    // ~20px vs accumulations ~30px) and must not collide/overwrite.
+    const cut = (g, ch, tag) => {
       const cx0 = Math.floor(g.x0 / PPOCR_UPSCALE), cy0 = Math.floor(g.y0 / PPOCR_UPSCALE)
       const cx1 = Math.ceil(g.x1 / PPOCR_UPSCALE), cy1 = Math.ceil(g.y1 / PPOCR_UPSCALE)
       const gw = cx1 - cx0 + 1, gh = cy1 - cy0 + 1
+      const safe = { '/': 'slash', '/s': 'slash-s', '.': 'dot' }[ch] || ch
+      const name = `glyph_${safe}_${tag}_${gw}x${gh}.png`
       const out = new PNG({ width: gw, height: gh })
       for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
         const si = ((cy0 + y) * cw + (cx0 + x)) * 4
-        const lum = Math.round((raw[si] * 77 + raw[si + 1] * 150 + raw[si + 2] * 29) >> 8)
         const oi = (y * gw + x) * 4
-        out.data[oi] = lum; out.data[oi + 1] = lum; out.data[oi + 2] = lum; out.data[oi + 3] = 255
+        out.data[oi] = raw[si]; out.data[oi + 1] = raw[si + 1]; out.data[oi + 2] = raw[si + 2]; out.data[oi + 3] = 255
       }
-      const safe = { '/': 'slash', '.': 'dot' }[ch] || ch
-      const fn = `glyph_${safe}_${file.replace('.png', '')}.png`
-      fs.writeFileSync(path.join(outDir, fn), PNG.sync.write(out))
-      const key = ch
-      if (!seen.has(key + fn)) { seen.add(key + fn); manifest.push({ char: ch, file: fn }) }
-      console.log(`  "${want}"[${i}] '${ch}' ${gw}x${gh} -> ${fn}`)
+      fs.writeFileSync(path.join(outDir, name), PNG.sync.write(out))
+      if (!seen.has(ch + name)) { seen.add(ch + name); manifest.push({ char: ch, file: name, set: 'mint', source: 'harvested' }) }
+      console.log(`  "${want}" '${ch}' ${gw}x${gh} -> ${name}`)
+      return name
+    }
+    assign.split('').forEach((ch, i) => {
+      cut(parts[i], ch, file.replace('.png', ''))
     })
+    // Trailing merged tail: for "/s" lines the tail boxes hold the inseparable
+    // "/s" combo — harvest it as ONE combo template at native scale instead
+    // of skipping it, so full-strip decode can claim the whole rate string.
+    if (parts.length > assign.length && /\/s$/.test(want)) {
+      const tail = parts.slice(assign.length)
+      const combo = {
+        x0: Math.min(...tail.map(p => p.x0)),
+        x1: Math.max(...tail.map(p => p.x1)),
+        y0: best.y0, y1: best.y1
+      }
+      cut(combo, '/s', file.replace('.png', ''))
+    }
   }
 }
 fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 1))

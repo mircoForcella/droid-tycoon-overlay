@@ -53,8 +53,7 @@ function extractSpots(lines, frame) {
 }
 
 // ---------- pass 1: PP-OCRv5 (mirror ppocr.ts) ----------
-function tealMask(src, w, h, scale) {
-  const W = w * scale, H = h * scale
+function tealMask(src, w, h, scale) {  const W = w * scale, H = h * scale
   const mask = new Uint8Array(W * H)
   let ink = 0
   for (let y = 0; y < H; y++) {
@@ -204,7 +203,56 @@ async function ppocrLines(raw, cw, ch) {
 }
 
 // ---------- glyph template pass (mirror glyphs.ts) ----------
-const GLYPH_THRESHOLD = 0.7
+const CANON = 32
+const ASPECT_GATE = 0.15
+const CANON_GATE = 0.1
+function canonicalize(ink, x0, y0, x1, y1, w) {
+  const sw = x1 - x0 + 1, sh = y1 - y0 + 1
+  const out = new Uint8Array(CANON * CANON)
+  for (let oy = 0; oy < CANON; oy++) {
+    const yA = (oy * sh) / CANON, yB = ((oy + 1) * sh) / CANON
+    const ya = Math.max(0, Math.floor(yA)), yb = Math.min(sh - 1, Math.ceil(yB) - 1)
+    for (let ox = 0; ox < CANON; ox++) {
+      const xA = (ox * sw) / CANON, xB = ((ox + 1) * sw) / CANON
+      const xa = Math.max(0, Math.floor(xA)), xb = Math.min(sw - 1, Math.ceil(xB) - 1)
+      let sum = 0, area = 0
+      for (let sy = ya; sy <= yb; sy++) {
+        const wy = Math.min(sy + 1, yB) - Math.max(sy, yA)
+        if (wy <= 0) continue
+        for (let sx = xa; sx <= xb; sx++) {
+          const wx = Math.min(sx + 1, xB) - Math.max(sx, xA)
+          if (wx <= 0) continue
+          area += wx * wy
+          if (ink[(y0 + sy) * w + (x0 + sx)]) sum += wx * wy
+        }
+      }
+      out[oy * CANON + ox] = area > 0 && sum / area >= 0.5 ? 1 : 0
+    }
+  }
+  return out
+}
+function canonMismatch(a, b) {
+  let mismatch = 0, union = 0
+  for (let i = 0; i < CANON * CANON; i++) {
+    if (a[i] || b[i]) { union++; if (a[i] !== b[i]) mismatch++ }
+  }
+  return union === 0 ? 1 : mismatch / union
+}
+function templateInk(data, w, h) {
+  const ink = new Uint8Array(w * h)
+  let ix0 = w, iy0 = h, ix1 = -1, iy1 = -1
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4
+    const r = data[i], g = data[i + 1], b = data[i + 2]
+    const hit = g > 110 && g - r > 45 && b - r > 15
+    if (hit) {
+      ink[y * w + x] = 1
+      if (x < ix0) ix0 = x; if (x > ix1) ix1 = x
+      if (y < iy0) iy0 = y; if (y > iy1) iy1 = y
+    }
+  }
+  return { ink, ix0, iy0, ix1, iy1 }
+}
 let _glyphs = null
 function loadGlyphs() {
   if (_glyphs) return _glyphs
@@ -213,10 +261,18 @@ function loadGlyphs() {
   const byChar = new Map()
   for (const m of manifest) {
     const p = PNG.sync.read(fs.readFileSync(path.join(base, m.file)))
-    const g = new Float32Array(p.width * p.height)
-    for (let i = 0; i < p.width * p.height; i++) g[i] = (p.data[i * 4] + p.data[i * 4 + 1] + p.data[i * 4 + 2]) / 3
+    const { ink, ix0, iy0, ix1, iy1 } = templateInk(p.data, p.width, p.height)
+    if (ix1 < ix0) continue
+    // luminance kept for NCC diagnostics only (never the gate)
+    const n = p.width * p.height
+    const lum = new Float32Array(n)
+    for (let i = 0; i < n; i++) lum[i] = (p.data[i * 4] + p.data[i * 4 + 1] + p.data[i * 4 + 2]) / 3
+    const tw = ix1 - ix0 + 1, th = iy1 - iy0 + 1
     if (!byChar.has(m.char)) byChar.set(m.char, [])
-    byChar.get(m.char).push({ g, w: p.width, h: p.height })
+    byChar.get(m.char).push({
+      char: m.char, aspect: tw / th, canon: canonicalize(ink, ix0, iy0, ix1, iy1, p.width), lum,
+      w: p.width, h: p.height, file: m.file,
+    })
   }
   if (byChar.size === 0) throw new Error('no glyph templates')
   _glyphs = byChar
@@ -288,37 +344,55 @@ function splitGlyphs(mask, W, line) {
 }
 function matchGlyphLines(raw, cw, ch) {
   const byChar = loadGlyphs()
-  let tm = tealMask(raw, cw, ch, PPOCR_UPSCALE)
-  if (tm.ink < MIN_TEAL_INK) {
-    const o = otsuMask(raw, cw, ch, PPOCR_UPSCALE)
-    tm = o
-  }
-  const out = []
-  for (const line of groupLines(findBoxes(tm.mask, tm.W, tm.H))) {
-    let text = ''
-    for (const gbox of splitGlyphs(tm.mask, tm.W, line)) {
-      const x0 = gbox.x0 / PPOCR_UPSCALE, y0 = gbox.y0 / PPOCR_UPSCALE
-      const gw = (gbox.x1 - gbox.x0 + 1) / PPOCR_UPSCALE, gh = (gbox.y1 - gbox.y0 + 1) / PPOCR_UPSCALE
-      const iw = Math.max(2, Math.round(gw)), ih = Math.max(2, Math.round(gh))
-      const obs = new Float32Array(iw * ih)
-      for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) {
-        const sx = Math.max(0, Math.min(cw - 1, Math.round(x0 + (x + 0.5) * (gw / iw))))
-        const sy = Math.max(0, Math.min(ch - 1, Math.round(y0 + (y + 0.5) * (gh / ih))))
-        const si = (sy * cw + sx) * 4
-        obs[y * iw + x] = (raw[si] + raw[si + 1] + raw[si + 2]) / 3
-      }
-      let best = '?', bs = GLYPH_THRESHOLD
-      for (const [ch, list] of byChar) {
-        for (const t of list) {
-          const s = ncc(obs, resizeGray(t.g, t.w, t.h, iw, ih))
-          if (s > bs) { bs = s; best = ch }
+  const stats = { comparisons: 0, aspectSkipped: 0 }
+  const decode = (m) => {
+    const out = []
+    for (const line of groupLines(findBoxes(m.mask, m.W, m.H))) {
+      let text = ''
+      for (const gbox of splitGlyphs(m.mask, m.W, line)) {
+      // Mask-space ink bbox -> stride-2 exact downsample (the 2x mask
+      // replicates raw pixels; no interpolation) -> crop-space compare.
+      let tx0 = gbox.x1, ty0 = gbox.y1, tx1 = gbox.x0, ty1 = gbox.y0
+      for (let y = gbox.y0; y <= gbox.y1; y++) {
+        for (let x = gbox.x0; x <= gbox.x1; x++) {
+          if (m.mask[y * m.W + x]) {
+            if (x < tx0) tx0 = x; if (x > tx1) tx1 = x
+            if (y < ty0) ty0 = y; if (y > ty1) ty1 = y
+          }
         }
+      }
+      if (ty1 < ty0 || tx1 < tx0) continue
+      const cx0 = tx0 >> 1, cy0 = ty0 >> 1, cx1 = tx1 >> 1, cy1 = ty1 >> 1
+      const cw2 = cx1 - cx0 + 1, ch2 = cy1 - cy0 + 1
+      const obs = new Uint8Array(cw2 * ch2)
+      for (let y = 0; y < ch2; y++) for (let x = 0; x < cw2; x++) {
+        obs[y * cw2 + x] = m.mask[(cy0 + y) * 2 * m.W + ((cx0 + x) * 2)] ? 1 : 0
+      }
+      const rAspect = cw2 / ch2
+      const rCanon = canonicalize(obs, 0, 0, cw2 - 1, ch2 - 1, cw2)
+      let best = '?', bs = CANON_GATE
+      for (const [ch, list] of byChar) {
+        let charBest = Infinity
+        for (const t of list) {
+          if (Math.abs(t.aspect - rAspect) > ASPECT_GATE) { stats.aspectSkipped++; continue }
+          stats.comparisons++
+          const s = canonMismatch(t.canon, rCanon)
+          if (s < charBest) charBest = s
+        }
+        if (charBest < bs) { bs = charBest; best = ch }
       }
       text += best
     }
-    if (text.length > 0) out.push({ text, bbox: { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 } })
+      if (text.length > 0) out.push({ text, bbox: { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 } })
+    }
+    return out
   }
-  return out
+  const lines = []
+  const teal = tealMask(raw, cw, ch, PPOCR_UPSCALE)
+  if (teal.ink >= MIN_TEAL_INK) lines.push(...decode(teal))
+  const sorted = lines.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0)
+  console.log(`glyph stats cmp=${stats.comparisons} aspectSkip=${stats.aspectSkipped}`)
+  return sorted
 }
 function upscaleRaw(src, w, h) {
   const scale = 2, W = w * scale, H = h * scale
@@ -355,30 +429,104 @@ function upscaleRaw(src, w, h) {
   console.log(`crop ${cw}x${ch} at ${cx},${cy}`)
   const frame = { frameW: img.width, frameH: img.height, originX: cx, originY: cy }
 
-  // Pass 1: PP-OCRv5 teal-mask strips, raw color read
-  let lines = [], upscale = PPOCR_UPSCALE, pass = 'ppocr'
-  try {
-    const t0 = Date.now()
-    lines = await ppocrLines(raw, cw, ch)
-    console.log(`${pass} in=${Date.now() - t0}ms lines=${lines.length}`)
-  } catch (e) {
-    console.log('ppocr failed, falling back: ' + String(e.message || e).slice(0, 160))
-    lines = []
+  // Scope-split mirror of src/main/ocr.ts. GLYPH_EXCLUDE=0 restores legacy
+  // order (PP-OCR -> glyphs-if-empty -> Tesseract-if-empty).
+  const splitOff = process.env.GLYPH_EXCLUDE === '0'
+  const claimedBoxes = (glyphLines) => {
+    const claimed = []
+    for (const line of glyphLines) {
+      let ok = false
+      const strict = /([\d.]+\s*[kmbt]?\s*\/s)/gi
+      let m
+      while ((m = strict.exec(line.text)) !== null) {
+        if (parseIncomeText(m[1]) !== null) { ok = true; break }
+      }
+      if (!ok) {
+        const hasRateMarker = /\/\s*s\s*$/i.test(line.text) || /[/lI17|]\s*[sS5]\s*$/.test(line.text)
+        if (hasRateMarker && /[\d]/.test(line.text) && line.text.length < 24) {
+          if (parseIncomeText(line.text) ?? parseFuzzyIncome(line.text)) ok = true
+        }
+      }
+      if (ok) claimed.push({ ...line.bbox })
+    }
+    return claimed
   }
-  let spots = extractSpots(lines, { ...frame, upscale })
+  const excludeClaimed = (ls, claimed) => {
+    if (claimed.length === 0) return { kept: ls, dropped: 0 }
+    const kept = []
+    let dropped = 0
+    for (const l of ls) {
+      const cx = (l.bbox.x0 + l.bbox.x1) / 2, cy = (l.bbox.y0 + l.bbox.y1) / 2
+      if (claimed.some(b => cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1)) dropped++
+      else kept.push(l)
+    }
+    return { kept, dropped }
+  }
+  const mergeSpots = (first, second) => {
+    const out = [...first]
+    for (const s of second) {
+      if (!out.some(k => Math.abs(k.value - s.value) / s.value < 0.001)) out.push(s)
+    }
+    const dist2 = (s) => (s.rx - 0.5) * (s.rx - 0.5) + (s.ry - 0.5) * (s.ry - 0.5)
+    return out.sort((a, b) => dist2(a) - dist2(b) || a.value - b.value)
+  }
 
-  // Glyph template pass (mirror ocr.ts): reference glyphs decide ties.
-  if (spots.length === 0) {
+  let lines = [], upscale = PPOCR_UPSCALE, pass = splitOff ? 'ppocr' : 'glyphs'
+  let claimed = [], glyphLines = [], glyphSpots = []
+  if (splitOff) {
+    // Legacy order
     try {
       const t0 = Date.now()
-      lines = matchGlyphLines(raw, cw, ch)
-      pass = 'glyphs'
-      console.log(`glyphs in=${Date.now() - t0}ms lines=${lines.length}`)
+      lines = await ppocrLines(raw, cw, ch)
+      console.log(`${pass} in=${Date.now() - t0}ms lines=${lines.length}`)
     } catch (e) {
-      console.log('glyphs failed: ' + String(e.message || e).slice(0, 120))
+      console.log('ppocr failed, falling back: ' + String(e.message || e).slice(0, 160))
       lines = []
     }
-    spots = extractSpots(lines, { ...frame, upscale })
+    var spots = extractSpots(lines, { ...frame, upscale })
+
+    if (spots.length === 0) {
+      try {
+        const t0 = Date.now()
+        lines = matchGlyphLines(raw, cw, ch)
+        pass = 'glyphs'
+        console.log(`glyphs in=${Date.now() - t0}ms lines=${lines.length}`)
+      } catch (e) {
+        console.log('glyphs failed: ' + String(e.message || e).slice(0, 120))
+        lines = []
+      }
+      spots = extractSpots(lines, { ...frame, upscale })
+    }
+  } else {
+    // Pass 1 (Class I): glyph matcher on color-keyed regions
+    try {
+      const t0 = Date.now()
+      glyphLines = matchGlyphLines(raw, cw, ch)
+      console.log(`glyphs in=${Date.now() - t0}ms lines=${glyphLines.length}`)
+    } catch (e) {
+      console.log('glyphs failed: ' + String(e.message || e).slice(0, 120))
+      glyphLines = []
+    }
+    glyphSpots = extractSpots(glyphLines, { ...frame, upscale })
+    claimed = claimedBoxes(glyphLines)
+    console.log(`glyphs claimed=${claimed.length} spots=${glyphSpots.length}`)
+
+    // Pass 2 (Class U + backup): PP-OCRv5 minus claimed regions
+    let ppLines = []
+    try {
+      const t0 = Date.now()
+      ppLines = await ppocrLines(raw, cw, ch)
+      const { kept, dropped } = excludeClaimed(ppLines, claimed)
+      console.log(`ppocr in=${Date.now() - t0}ms lines=${ppLines.length} excluded=${dropped} kept=${kept.length}`)
+      ppLines = kept
+    } catch (e) {
+      console.log('ppocr failed: ' + String(e.message || e).slice(0, 160))
+      ppLines = []
+    }
+    const ppSpots = extractSpots(ppLines, { ...frame, upscale })
+    var spots = mergeSpots(glyphSpots, ppSpots)
+    lines = [...glyphLines, ...ppLines]
+    pass = glyphSpots.length > 0 ? (ppSpots.length > 0 ? 'glyphs+ppocr' : 'glyphs') : 'ppocr'
   }
 
   // Pass 3: Tesseract fallback on raw upscale when no usable spots
@@ -404,8 +552,16 @@ function upscaleRaw(src, w, h) {
     }
     await worker.terminate()
     upscale = 2
-    pass = 'center-crop'
-    spots = extractSpots(lines, { ...frame, upscale })
+    if (!splitOff && claimed.length > 0) {
+      const { kept, dropped } = excludeClaimed(lines, claimed)
+      console.log(`tesseract excluded=${dropped} kept=${kept.length}`)
+      lines = [...glyphLines, ...kept]
+      pass = `${pass}+center-crop`
+      spots = mergeSpots(glyphSpots, extractSpots(kept, { ...frame, upscale }))
+    } else {
+      pass = 'center-crop'
+      spots = extractSpots(lines, { ...frame, upscale })
+    }
   }
 
   console.log(`pass=${pass} lines=` + lines.length)

@@ -1,14 +1,18 @@
-// Offline OCR income spotter (PP-OCRv5 + tesseract.js fallback, eng only).
-// Tuned for Fortnite's chunky outlined display font:
-//   1. teal-chroma isolate -> connected-component line strips -> PP-OCRv5
-//      recognizer via onnxruntime-node (primary; exact on shot1/shot2)
-//   2. fallback: binarized + 3x upscale -> Tesseract PSM SINGLE_BLOCK +
-//      rate-token whitelist (only when pass 1 yields no lines)
-//   3. strict `/s` match (K/M/B/T) plus a fallback for common glyph confusions
-//      (/ -> l/1, s -> 5) gated on an end-of-line /s marker, so accumulations
-//      like "15.50B" never become spots.
-//   4. spots ranked by distance to screen center (crosshair) — closest first.
-// On-demand only. Never runs continuously.
+// Offline OCR income spotter (glyph templates + PP-OCRv5 + tesseract.js).
+// Scope-split two-pass pipeline over ONE F9 frame:
+//   Pass 1 (primary for Class I): glyph template matching on the
+//     mint/teal color-keyed mask -> claimed boxes + decoded strings.
+//     Only lines that parse as income rates are claimed; anything else
+//     ('?', fragments, non-income) returns to the Pass 2 pool — never drop.
+//   Pass 2 (Class U + backup): PP-OCRv5 on the frame with gate-accepted
+//     Pass 1 boxes excluded at proposal level (no pixel surgery), so neon
+//     glow stops polluting text proposals. OCR never runs inside claimed
+//     regions; glyphs never run outside color-keyed regions.
+//   Pass 3 (fallback): Tesseract on RAW upscale when merged spots are empty.
+// Merged result: income fields from Pass 1 take priority, everything else
+// from Pass 2. No schema change for consumers (spot popup, sell mode).
+// Rollback: GLYPH_EXCLUDE=0 restores the legacy order exactly
+// (PP-OCR -> glyphs-if-empty -> Tesseract-if-empty, no exclusion).
 //
 // Packaging note: the tesseract worker thread + wasm engine are shipped as
 // plain files (see scripts/copy-ocr-assets.js) and referenced by explicit
@@ -169,6 +173,77 @@ function extractSpots(
   return spots.sort((a, b) => dist2(a) - dist2(b) || a.value - b.value)
 }
 
+// Rollback flag for the scope-split pipeline. GLYPH_EXCLUDE=0 reproduces the
+// legacy order exactly (PP-OCR -> glyphs-if-empty -> Tesseract-if-empty with
+// no box exclusion). Any other value (including unset) enables scope-split.
+export let glyphExclusionEnabled = process.env.GLYPH_EXCLUDE !== '0'
+export function setGlyphExclusion(v: boolean): void {
+  glyphExclusionEnabled = v
+}
+
+type ClaimBox = { x0: number; y0: number; x1: number; y1: number }
+
+// Claimed regions: glyph lines that decode to at least one parseable income
+// token (same gates as extractSpots). Rejection routing: lines that fire but
+// fail the parse ('?', fragments,_accumulations without /s) are NOT claimed
+// and stay in the Pass 2 pool — a color-mask false positive degrades to
+// current OCR behavior, never to silence.
+function claimedGlyphBoxes(glyphLines: OcrLine[]): ClaimBox[] {
+  const claimed: ClaimBox[] = []
+  for (const line of glyphLines) {
+    let ok = false
+    const strict = /([\d.]+\s*[kmbt]?\s*\/s)/gi
+    let m: RegExpExecArray | null
+    while ((m = strict.exec(line.text)) !== null) {
+      if (parseIncomeText(m[1]) !== null) {
+        ok = true
+        break
+      }
+    }
+    if (!ok) {
+      const hasRateMarker = /\/\s*s\s*$/i.test(line.text) || /[/lI17|]\s*[sS5]\s*$/.test(line.text)
+      if (hasRateMarker && /[\d]/.test(line.text) && line.text.length < 24) {
+        if (parseIncomeText(line.text) ?? parseFuzzyIncome(line.text)) ok = true
+      }
+    }
+    if (ok) claimed.push({ ...line.bbox })
+  }
+  return claimed
+}
+
+// Proposal-level exclusion: drop OCR lines whose center falls inside a
+// claimed Pass 1 box (all boxes share the 2x mask coord space). Everything
+// else passes through untouched, so Class U text is fully preserved.
+function excludeClaimed(
+  lines: OcrLine[],
+  claimed: ClaimBox[]
+): { kept: OcrLine[]; dropped: number } {
+  if (claimed.length === 0) return { kept: lines, dropped: 0 }
+  const kept: OcrLine[] = []
+  let dropped = 0
+  for (const l of lines) {
+    const cx = (l.bbox.x0 + l.bbox.x1) / 2
+    const cy = (l.bbox.y0 + l.bbox.y1) / 2
+    if (claimed.some(b => cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1)) {
+      dropped++
+    } else {
+      kept.push(l)
+    }
+  }
+  return { kept, dropped }
+}
+
+// Merge Pass 1 + Pass 2 spots: Pass 1 wins value ties (same income read by
+// both), then center-distance ranking as before. Stable: glyph order kept.
+function mergeSpots(first: IncomeSpot[], second: IncomeSpot[]): IncomeSpot[] {
+  const out = [...first]
+  for (const s of second) {
+    if (!out.some(k => Math.abs(k.value - s.value) / s.value < 0.001)) out.push(s)
+  }
+  const dist2 = (s: IncomeSpot) => (s.rx - 0.5) * (s.rx - 0.5) + (s.ry - 0.5) * (s.ry - 0.5)
+  return out.sort((a, b) => dist2(a) - dist2(b) || a.value - b.value)
+}
+
 export interface SpotResult {
   spots: IncomeSpot[]
   meta: { frameW: number; frameH: number; lines: number; sample: string; pass: string }
@@ -290,40 +365,82 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       scale: crop.scale
     }
 
-    // Pass 1 (primary): PP-OCRv5 recognition on teal-mask line strips.
-    // Strictly better than Tesseract on game font (shot1: exact "15.50B";
-    // shot2: keeps the leading 9 in "92.80K/s"). Any failure — missing
-    // models, no native binding — falls through to the Tesseract pass.
+    // SCOPE-SPLIT pipeline (flag on): glyphs claim Class I first, PP-OCR
+    // reads everything else with claimed boxes excluded, Tesseract backs up
+    // only when the merge is empty. LEGACY path (flag off) preserves the old
+    // order exactly: PP-OCR -> glyphs-if-empty -> Tesseract-if-empty.
     lines = []
     upscale = PPOCR_UPSCALE
-    pass = 'ppocr'
-    try {
-    const { recognizeLines } = await import('./ppocr')
-    const tPp = Date.now()
-    const res = await recognizeLines(raw, size.width, size.height)
-    lines = res.lines
-    dbg(`ppocr in=${Date.now() - tPp}ms ink=${(res.ink * 100).toFixed(2)}%${res.otsu ? ' OTSU-FALLBACK' : ''} lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
-    } catch (e) {
-      dbg(`ppocr failed, falling back to tesseract: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
-      lines = []
-    }
-    spots = extractSpots(lines, { ...frame, upscale })
+    pass = glyphExclusionEnabled ? 'glyphs' : 'ppocr'
+    let claimed: ClaimBox[] = []
+    let glyphLines: OcrLine[] = []
+    let glyphSpots: IncomeSpot[] = []
 
-    if (spots.length === 0) {
-      // Pass 2: glyph template matching (no ML). Reference glyphs cut from
-      // user-confirmed frames live in ocr-glyphs/; '?' marks anything below
-      // threshold so parsers reject the line instead of misreading it.
+    if (!glyphExclusionEnabled) {
+      // ---- Legacy order (GLYPH_EXCLUDE=0): unchanged behavior ----
       try {
-        const { matchLines } = await import('./glyphs')
-        const tT = Date.now()
-        lines = await matchLines(raw, size.width, size.height)
-        pass = 'glyphs'
-        dbg(`glyphs in=${Date.now() - tT}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+      const { recognizeLines } = await import('./ppocr')
+      const tPp = Date.now()
+      const res = await recognizeLines(raw, size.width, size.height)
+      lines = res.lines
+      dbg(`ppocr in=${Date.now() - tPp}ms ink=${(res.ink * 100).toFixed(2)}%${res.otsu ? ' OTSU-FALLBACK' : ''} lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
       } catch (e) {
-        dbg(`glyphs failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
+        dbg(`ppocr failed, falling back to tesseract: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
         lines = []
       }
       spots = extractSpots(lines, { ...frame, upscale })
+
+      if (spots.length === 0) {
+        try {
+          const { matchLines } = await import('./glyphs')
+          const tT = Date.now()
+          lines = await matchLines(raw, size.width, size.height)
+          pass = 'glyphs'
+          dbg(`glyphs in=${Date.now() - tT}ms lines=${lines.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)
+        } catch (e) {
+          dbg(`glyphs failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
+          lines = []
+        }
+        spots = extractSpots(lines, { ...frame, upscale })
+      }
+    } else {
+      // ---- Pass 1 (Class I): glyph matcher on color-keyed regions ----
+      try {
+        const { matchLines } = await import('./glyphs')
+        const tG = Date.now()
+        glyphLines = await matchLines(raw, size.width, size.height)
+        dbg(`glyphs in=${Date.now() - tG}ms lines=${glyphLines.length} sample=${glyphLines.map(l => l.text).join(' | ').slice(0, 160)}`)
+      } catch (e) {
+        dbg(`glyphs failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`)
+        glyphLines = []
+      }
+      glyphSpots = extractSpots(glyphLines, { ...frame, upscale })
+      claimed = claimedGlyphBoxes(glyphLines)
+      try {
+        const { lastMatchStats } = await import('./glyphs')
+        const st = lastMatchStats()
+        dbg(`glyphs claimed=${claimed.length} spots=${glyphSpots.length} cmp=${st.comparisons} aspectSkip=${st.aspectSkipped}`)
+      } catch {
+        dbg(`glyphs claimed=${claimed.length} spots=${glyphSpots.length}`)
+      }
+
+      // ---- Pass 2 (Class U + backup): PP-OCRv5 minus claimed regions ----
+      let ppLines: OcrLine[] = []
+      try {
+        const { recognizeLines } = await import('./ppocr')
+        const tPp = Date.now()
+        const res = await recognizeLines(raw, size.width, size.height)
+        const { kept, dropped } = excludeClaimed(res.lines, claimed)
+        ppLines = kept
+        dbg(`ppocr in=${Date.now() - tPp}ms ink=${(res.ink * 100).toFixed(2)}%${res.otsu ? ' OTSU-FALLBACK' : ''} lines=${res.lines.length} excluded=${dropped} kept=${kept.length} sample=${kept.map(l => l.text).join(' | ').slice(0, 160)}`)
+      } catch (e) {
+        dbg(`ppocr failed: ${String((e as Error)?.message ?? e).slice(0, 160)}`)
+        ppLines = []
+      }
+      const ppSpots = extractSpots(ppLines, { ...frame, upscale })
+      spots = mergeSpots(glyphSpots, ppSpots)
+      lines = [...glyphLines, ...ppLines]
+      pass = glyphSpots.length > 0 ? (ppSpots.length > 0 ? 'glyphs+ppocr' : 'glyphs') : 'ppocr'
     }
 
     if (spots.length === 0) {
@@ -348,10 +465,21 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       const recognized = await (worker as unknown as {
         recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
       }).recognize(cooked, {}, { blocks: true })
-      lines = linesOf((recognized as { data: unknown }).data, size)
+      const tessLines = linesOf((recognized as { data: unknown }).data, size)
       upscale = 2
-      pass = 'center-crop'
-      spots = extractSpots(lines, { ...frame, upscale })
+      if (glyphExclusionEnabled && claimed.length > 0) {
+        // Same 2x coord space as the claimed boxes: exclude, never drop
+        // silently — the filter only removes centers inside claimed strips.
+        const { kept, dropped } = excludeClaimed(tessLines, claimed)
+        lines = [...glyphLines, ...kept]
+        dbg(`tesseract excluded=${dropped} kept=${kept.length}`)
+        pass = `${pass}+center-crop`
+        spots = mergeSpots(glyphSpots, extractSpots(kept, { ...frame, upscale }))
+      } else {
+        lines = tessLines
+        pass = 'center-crop'
+        spots = extractSpots(lines, { ...frame, upscale })
+      }
     }
   }
   dbg(`done in=${Date.now() - t0}ms pass=${pass} lines=${lines.length} spots=${spots.length} sample=${lines.map(l => l.text).join(' | ').slice(0, 160)}`)

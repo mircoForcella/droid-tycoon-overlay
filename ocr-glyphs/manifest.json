@@ -1,74 +1,195 @@
 [
  {
   "char": "9",
-  "file": "glyph_9_shot1.png"
+  "file": "glyph_9_shot1_20x21.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "2",
-  "file": "glyph_2_shot1.png"
+  "file": "glyph_2_shot1_21x21.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": ".",
-  "file": "glyph_dot_shot1.png"
+  "file": "glyph_dot_shot1_7x21.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "8",
-  "file": "glyph_8_shot1.png"
+  "file": "glyph_8_shot1_20x21.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "0",
-  "file": "glyph_0_shot1.png"
+  "file": "glyph_0_shot1_21x21.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "K",
-  "file": "glyph_K_shot1.png"
+  "file": "glyph_K_shot1_22x21.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "/s",
+  "file": "glyph_slash-s_shot1_27x21.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "1",
-  "file": "glyph_1_shot1.png"
+  "file": "glyph_1_shot1_18x33.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "5",
-  "file": "glyph_5_shot1.png"
- },
- {
-  "char": "B",
-  "file": "glyph_B_shot1.png"
- },
- {
-  "char": "9",
-  "file": "glyph_9_shot2.png"
- },
- {
-  "char": "2",
-  "file": "glyph_2_shot2.png"
+  "file": "glyph_5_shot1_29x33.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": ".",
-  "file": "glyph_dot_shot2.png"
- },
- {
-  "char": "8",
-  "file": "glyph_8_shot2.png"
+  "file": "glyph_dot_shot1_10x33.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "0",
-  "file": "glyph_0_shot2.png"
- },
- {
-  "char": "K",
-  "file": "glyph_K_shot2.png"
- },
- {
-  "char": "1",
-  "file": "glyph_1_shot2.png"
- },
- {
-  "char": "3",
-  "file": "glyph_3_shot2.png"
+  "file": "glyph_0_shot1_32x33.png",
+  "set": "mint",
+  "source": "harvested"
  },
  {
   "char": "B",
-  "file": "glyph_B_shot2.png"
- }
+  "file": "glyph_B_shot1_32x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "9",
+  "file": "glyph_9_shot2_17x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "2",
+  "file": "glyph_2_shot2_20x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": ".",
+  "file": "glyph_dot_shot2_6x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "8",
+  "file": "glyph_8_shot2_18x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "0",
+  "file": "glyph_0_shot2_20x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "K",
+  "file": "glyph_K_shot2_21x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "/s",
+  "file": "glyph_slash-s_shot2_25x20.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "1",
+  "file": "glyph_1_shot2_16x30.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": ".",
+  "file": "glyph_dot_shot2_8x30.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "3",
+  "file": "glyph_3_shot2_27x30.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "0",
+  "file": "glyph_0_shot2_29x30.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+  {
+   "char": "B",
+   "file": "glyph_B_shot2_28x30.png",
+   "set": "mint",
+   "source": "harvested"
+  },
+  {
+   "char": "0",
+   "file": "zero.png",
+   "source": "manual"
+  },
+  {
+   "char": "1",
+   "file": "one.png",
+   "source": "manual"
+  },
+  {
+   "char": "3",
+   "file": "three.png",
+   "source": "manual"
+  },
+  {
+   "char": "8",
+   "file": "eight.png",
+   "source": "manual"
+  },
+  {
+   "char": "K",
+   "file": "K.png",
+   "source": "manual"
+  },
+  {
+   "char": "4",
+   "file": "four.png",
+   "source": "manual",
+   "provisional": true
+  },
+  {
+   "char": "6",
+   "file": "six.png",
+   "source": "manual",
+   "provisional": true
+  },
+  {
+   "char": "7",
+   "file": "seven.png",
+   "source": "manual",
+   "provisional": true
+  },
+  {
+   "char": "M",
+   "file": "M.png",
+   "source": "manual",
+   "provisional": true
+  }
 ]

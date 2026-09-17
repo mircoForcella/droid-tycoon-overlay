@@ -1,17 +1,18 @@
-// Glyph template matching fallback (no ML, no new deps).
-// Reference glyphs are cut from user-confirmed frames (scripts/cut-glyphs.js)
-// and versioned in ocr-glyphs/ + manifest.json — every corrected miss becomes
-// permanent reference data that ships to all installs. Matching is grayscale
-// normalized cross-correlation, multi-sample per char, threshold-gated.
-// Unrecognized glyphs decode as '?' so parsers (strict /s + table gate)
-// reject the line instead of placing anything wrong.
+// Glyph template matching — Pass 1 primary for Class I (floating income
+// strips). Closed vocabulary from harvested frames; templates are pixel-exact
+// color crops versioned in ocr-glyphs/ + manifest.json. Unrecognized glyphs
+// decode as '?' so parsers reject the line instead of placing anything wrong.
+//
+// Scope-split invariants:
+// - Runs ONLY on the mint/teal color-keyed mask. No Otsu fallback: white UI
+//   text must never reach the template matcher.
+// - The "/s" combo template has char "/s" and emits two characters per match.
 import { app } from 'electron'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { PNG } from 'pngjs'
 import {
   tealMask,
-  otsuMask,
   MIN_TEAL_INK,
   findBoxes,
   groupLines,
@@ -19,8 +20,6 @@ import {
   type Box,
   type PpOcrLine
 } from './ppocr'
-
-const MATCH_THRESHOLD = 0.7
 
 const here = join(fileURLToPath(import.meta.url), '..')
 
@@ -31,9 +30,38 @@ function glyphsBase(): string {
 
 interface Template {
   char: string
-  g: Float32Array
-  w: number
-  h: number
+  aspect: number // tight-ink width / height — pre-gate before canonical compare
+  canon: Uint8Array // 32x32 binary shape, box-average resampled + rethresholded
+}
+
+// Template fill rule — MUST be pixel-identical to tealMask in ppocr.ts:
+// harvested crops keep full color precisely so both sides share one fill
+// definition.
+function templateInk(
+  data: Buffer, w: number, h: number
+): { ink: Uint8Array; ix0: number; iy0: number; ix1: number; iy1: number } {
+  const ink = new Uint8Array(w * h)
+  let ix0 = w
+  let iy0 = h
+  let ix1 = -1
+  let iy1 = -1
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      const hit = g > 110 && g - r > 45 && b - r > 15
+      if (hit) {
+        ink[y * w + x] = 1
+        if (x < ix0) ix0 = x
+        if (x > ix1) ix1 = x
+        if (y < iy0) iy0 = y
+        if (y > iy1) iy1 = y
+      }
+    }
+  }
+  return { ink, ix0, iy0, ix1, iy1 }
 }
 
 let templatesPromise: Promise<Map<string, Template[]>> | null = null
@@ -45,16 +73,20 @@ async function getTemplates(): Promise<Map<string, Template[]>> {
       const base = glyphsBase()
       const manifest = JSON.parse(
         await fs.readFile(join(base, 'manifest.json'), 'utf8')
-      ) as Array<{ char: string; file: string }>
+      ) as Array<{ char: string; file: string; set?: string }>
       const byChar = new Map<string, Template[]>()
       for (const m of manifest) {
         const buf = await fs.readFile(join(base, m.file))
         const png = PNG.sync.read(buf)
-        const g = new Float32Array(png.width * png.height)
-        for (let i = 0; i < png.width * png.height; i++) {
-          g[i] = (png.data[i * 4] + png.data[i * 4 + 1] + png.data[i * 4 + 2]) / 3
+        const { ink, ix0, iy0, ix1, iy1 } = templateInk(png.data, png.width, png.height)
+        if (ix1 < ix0) continue // blank template — never load emptiness
+        const w = ix1 - ix0 + 1
+        const h = iy1 - iy0 + 1
+        const t: Template = {
+          char: m.char,
+          aspect: w / h,
+          canon: canonicalize(ink, ix0, iy0, ix1, iy1, png.width)
         }
-        const t = { char: m.char, g, w: png.width, h: png.height }
         if (!byChar.has(m.char)) byChar.set(m.char, [])
         byChar.get(m.char)!.push(t)
       }
@@ -65,48 +97,73 @@ async function getTemplates(): Promise<Map<string, Template[]>> {
   return templatesPromise
 }
 
-function resizeBilinear(g: Float32Array, w: number, h: number, W: number, H: number): Float32Array {
-  const out = new Float32Array(W * H)
-  for (let y = 0; y < H; y++) {
-    const sy = Math.min(h - 1, Math.max(0, (y + 0.5) * h / H - 0.5))
-    const yA = Math.floor(sy)
-    const yB = Math.min(h - 1, yA + 1)
-    const fy = sy - yA
-    for (let x = 0; x < W; x++) {
-      const sx = Math.min(w - 1, Math.max(0, (x + 0.5) * w / W - 0.5))
-      const xA = Math.floor(sx)
-      const xB = Math.min(w - 1, xA + 1)
-      const fx = sx - xA
-      out[y * W + x] =
-        (g[yA * w + xA] * (1 - fx) + g[yA * w + xB] * fx) * (1 - fy) +
-        (g[yB * w + xA] * (1 - fx) + g[yB * w + xB] * fx) * fy
+// Scale-invariant shape matching: tight ink bboxes are resampled to a fixed
+// 32x32 canonical grid (box-average, rethreshold 0.5) and compared there.
+// Score = mismatched cells / union cells. Accept gate: CANON_GATE (0.10).
+// An aspect pre-gate (|Δaspect| ≤ 0.15) keeps narrow/wide glyphs apart before
+// the square grid erases proportions. NCC is diagnostic-only, never the gate.
+const CANON = 32
+const ASPECT_GATE = 0.15
+const CANON_GATE = 0.1
+
+// Box-average resample of a binary mask bbox to the 32x32 canonical grid.
+// Pure TS, area-weighted, rethresholded at 0.5 — no dependencies.
+function canonicalize(
+  ink: Uint8Array, x0: number, y0: number, x1: number, y1: number, w: number
+): Uint8Array {
+  const sw = x1 - x0 + 1
+  const sh = y1 - y0 + 1
+  const out = new Uint8Array(CANON * CANON)
+  for (let oy = 0; oy < CANON; oy++) {
+    const yA = (oy * sh) / CANON
+    const yB = ((oy + 1) * sh) / CANON
+    const ya = Math.max(0, Math.floor(yA))
+    const yb = Math.min(sh - 1, Math.ceil(yB) - 1)
+    for (let ox = 0; ox < CANON; ox++) {
+      const xA = (ox * sw) / CANON
+      const xB = ((ox + 1) * sw) / CANON
+      const xa = Math.max(0, Math.floor(xA))
+      const xb = Math.min(sw - 1, Math.ceil(xB) - 1)
+      let sum = 0
+      let area = 0
+      for (let sy = ya; sy <= yb; sy++) {
+        const wy = Math.min(sy + 1, yB) - Math.max(sy, yA)
+        if (wy <= 0) continue
+        for (let sx = xa; sx <= xb; sx++) {
+          const wx = Math.min(sx + 1, xB) - Math.max(sx, xA)
+          if (wx <= 0) continue
+          area += wx * wy
+          if (ink[(y0 + sy) * w + (x0 + sx)]) sum += wx * wy
+        }
+      }
+      out[oy * CANON + ox] = area > 0 && sum / area >= 0.5 ? 1 : 0
     }
   }
   return out
 }
 
-function ncc(a: Float32Array, b: Float32Array): number {
-  const n = a.length
-  let ma = 0
-  let mb = 0
-  for (let i = 0; i < n; i++) {
-    ma += a[i]
-    mb += b[i]
+function canonMismatch(a: Uint8Array, b: Uint8Array): number {
+  let mismatch = 0
+  let union = 0
+  for (let i = 0; i < CANON * CANON; i++) {
+    if (a[i] || b[i]) {
+      union++
+      if (a[i] !== b[i]) mismatch++
+    }
   }
-  ma /= n
-  mb /= n
-  let sab = 0
-  let saa = 0
-  let sbb = 0
-  for (let i = 0; i < n; i++) {
-    const da = a[i] - ma
-    const db = b[i] - mb
-    sab += da * db
-    saa += da * da
-    sbb += db * db
-  }
-  if (saa < 1e-9 || sbb < 1e-9) return -1
-  return sab / Math.sqrt(saa * sbb)
+  return union === 0 ? 1 : mismatch / union
+}
+
+interface MatchStats {
+  comparisons: number
+  aspectSkipped: number
+}
+
+let lastStats: MatchStats = { comparisons: 0, aspectSkipped: 0 }
+
+/** Counters from the most recent matchLines() call (diagnostics). */
+export function lastMatchStats(): MatchStats {
+  return { ...lastStats }
 }
 
 // Split a mask-space line box into glyph boxes via projection valleys
@@ -171,53 +228,85 @@ function splitGlyphs(
   return parts.sort((a, b) => a.x0 - b.x0)
 }
 
-function sampleGray(src: Buffer, srcW: number, srcH: number, gx: number, gy: number): number {
-  const x = Math.max(0, Math.min(srcW - 1, Math.round(gx)))
-  const y = Math.max(0, Math.min(srcH - 1, Math.round(gy)))
-  const si = (y * srcW + x) * 4
-  return (src[si] + src[si + 1] + src[si + 2]) / 3
-}
-
-/** Template-match line strips from a raw BGRA crop. Throws on any failure. */
-export async function matchLines(src: Buffer, w: number, h: number): Promise<PpOcrLine[]> {
+/** Template-match Class I line strips in a raw BGRA crop. Throws on failure.
+ * Color-keyed only: the mint/teal mask (no Otsu — UI text stays in Pass 2).
+ * Scale-invariant: tight ink bboxes go through the 32x32 canonical grid with
+ * an aspect pre-gate (|Δ| ≤ 0.15); best exemplar per character wins, best
+ * character wins the ROI at mismatch/union ≤ 0.10.
+ * The "/s" manifest entry emits two characters per single-template match. */
+export async function matchLines(_src: Buffer, _w: number, _h: number): Promise<PpOcrLine[]> {
   const byChar = await getTemplates()
-  let { mask, W, H, ink } = tealMask(src, w, h, PPOCR_UPSCALE)
-  if (ink < MIN_TEAL_INK) {
-    ;({ mask, W, H } = otsuMask(src, w, h, PPOCR_UPSCALE))
-  }
-  const out: PpOcrLine[] = []
-  for (const line of groupLines(findBoxes(mask, W, H))) {
-    let text = ''
-    for (const g of splitGlyphs(mask, W, line)) {
-      // glyph box (mask coords) -> raw crop coords for sampling
-      const x0 = g.x0 / PPOCR_UPSCALE
-      const y0 = g.y0 / PPOCR_UPSCALE
-      const gw = (g.x1 - g.x0 + 1) / PPOCR_UPSCALE
-      const gh = (g.y1 - g.y0 + 1) / PPOCR_UPSCALE
-      const iw = Math.max(2, Math.round(gw))
-      const ih = Math.max(2, Math.round(gh))
-      const obs = new Float32Array(iw * ih)
-      for (let y = 0; y < ih; y++) {
-        for (let x = 0; x < iw; x++) {
-          obs[y * iw + x] = sampleGray(src, w, h, x0 + (x + 0.5) * (gw / iw), y0 + (y + 0.5) * (gh / ih))
-        }
-      }
-      let best = '?'
-      let bestScore = MATCH_THRESHOLD
-      for (const [char, list] of byChar) {
-        for (const t of list) {
-          const s = ncc(obs, resizeBilinear(t.g, t.w, t.h, iw, ih))
-          if (s > bestScore) {
-            bestScore = s
-            best = char
+  lastStats = { comparisons: 0, aspectSkipped: 0 }
+  const decode = (
+    mask: Uint8Array, W: number, H: number
+  ): PpOcrLine[] => {
+    const out: PpOcrLine[] = []
+    for (const line of groupLines(findBoxes(mask, W, H))) {
+      let text = ''
+      for (const g of splitGlyphs(mask, W, line)) {
+        // Tighten to the ink bbox in mask space, then step down to crop
+        // coords: the 2x mask replicates each raw pixel into a 2x2 block
+        // (nearest), so sampling stride-2 recovers the exact per-pixel fill
+        // with no interpolation.
+        let tx0 = g.x1
+        let ty0 = g.y1
+        let tx1 = g.x0
+        let ty1 = g.y0
+        for (let y = g.y0; y <= g.y1; y++) {
+          for (let x = g.x0; x <= g.x1; x++) {
+            if (mask[y * W + x]) {
+              if (x < tx0) tx0 = x
+              if (x > tx1) tx1 = x
+              if (y < ty0) ty0 = y
+              if (y > ty1) ty1 = y
+            }
           }
         }
+        if (ty1 < ty0 || tx1 < tx0) continue // no ink — never claim emptiness
+        const cx0 = tx0 >> 1
+        const cy0 = ty0 >> 1
+        const cx1 = tx1 >> 1
+        const cy1 = ty1 >> 1
+        const rw = cx1 - cx0 + 1
+        const rh = cy1 - cy0 + 1
+        const obs = new Uint8Array(rw * rh)
+        for (let y = 0; y < rh; y++) {
+          for (let x = 0; x < rw; x++) {
+            obs[y * rw + x] = mask[(cy0 + y) * 2 * W + ((cx0 + x) * 2)] ? 1 : 0
+          }
+        }
+        const rAspect = rw / rh
+        const rCanon = canonicalize(obs, 0, 0, rw - 1, rh - 1, rw)
+        let best = '?'
+        let bestScore = CANON_GATE
+        for (const [, list] of byChar) {
+          // Best exemplar per character first.
+          let charBest = Infinity
+          for (const t of list) {
+            if (Math.abs(t.aspect - rAspect) > ASPECT_GATE) {
+              lastStats.aspectSkipped++
+              continue
+            }
+            lastStats.comparisons++
+            const s = canonMismatch(t.canon, rCanon)
+            if (s < charBest) charBest = s
+          }
+          // Then best character wins the ROI.
+          if (charBest < bestScore) {
+            bestScore = charBest
+            best = list[0].char
+          }
+        }
+        text += best // "/s" entries contribute two chars here by design
       }
-      text += best
+      if (text.length > 0) {
+        out.push({ text, bbox: { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 } })
+      }
     }
-    if (text.length > 0) {
-      out.push({ text, bbox: { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 } })
-    }
+    return out
   }
-  return out
+  const lines: PpOcrLine[] = []
+  const teal = tealMask(_src, _w, _h, PPOCR_UPSCALE)
+  if (teal.ink >= MIN_TEAL_INK) lines.push(...decode(teal.mask, teal.W, teal.H))
+  return lines.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0)
 }

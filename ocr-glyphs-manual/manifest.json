@@ -1,0 +1,16 @@
+[
+  { "char": "0", "file": "zero.png" },
+  { "char": "1", "file": "one.png" },
+  { "char": "2", "file": "two.png" },
+  { "char": "3", "file": "three.png" },
+  { "char": "4", "file": "four.png" },
+  { "char": "5", "file": "five.png" },
+  { "char": "6", "file": "six.png" },
+  { "char": "7", "file": "seven.png" },
+  { "char": "8", "file": "eight.png" },
+  { "char": "9", "file": "nine.png" },
+  { "char": "K", "file": "K.png" },
+  { "char": "M", "file": "M.png" },
+  { "char": ".", "file": "dot.png" },
+  { "char": "/s", "file": "symbol and letter s go together.png" }
+]
