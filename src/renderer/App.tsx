@@ -166,9 +166,11 @@ function App() {
       }
     }
     window.addEventListener('keydown', onKey)
-    // Always launch expanded: a persisted minimized state must never greet
-    // the user (F1 minimizes, but relaunch reopens).
-    useStore.getState().setCollapsed(false)
+    // Respect the persisted minimize state: F1-minimize must survive relaunch
+    // AND window recreation (display sleep/wake rebuilds every window and
+    // used to force-expand all of them — full duplicate panel on screen 2).
+    // Fresh installs boot expanded once via the store default (collapsed:
+    // false); after that the user's saved state rules every window.
     // Re-apply saved monitor choice (main starts with 'all')
     const pref = useStore.getState().overlayDisplay
     if (pref !== 'all') api?.setOverlayDisplay(Number(pref))

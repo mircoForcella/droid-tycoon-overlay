@@ -49,6 +49,17 @@ function broadcast(channel: string, ...args: unknown[]) {
   }
 }
 
+// Force a compositor repaint. Transparent always-on-top windows can keep a
+// stale DWM frame after state flips (collapse toggles, click-through
+// focus/mouse-event flips, window rebuilds): content shrinks or shifts a few
+// px and the old pixels stay painted ("moved but left the original behind").
+// Invalidate is cheap and targeted — call after every such transition.
+function repaint(w: BrowserWindow) {
+  try {
+    w.webContents.invalidate()
+  } catch {}
+}
+
 // ---- In-app updates (electron-updater + GitHub Releases) ----
 // Downloads in the background, never force-restarts: the user installs
 // from the Setup tab when ready (or it applies on quit).
@@ -178,6 +189,7 @@ function recreateWindows() {
   destroyWindows()
   windows = fresh
   applyClickThrough()
+  for (const w of windows) repaint(w)
   log(`overlay windows recreated: ${windows.length}`)
 }
 
@@ -439,6 +451,7 @@ function setInteractive(enabled: boolean) {
     }
   }
   broadcast('click-through-changed', isClickThrough)
+  for (const w of allWindows()) repaint(w)
   log(`interactive=${enabled}`)
 }
 
@@ -453,6 +466,7 @@ function toggleVisibility() {
       if (isVisible) {
         w.show()
         w.moveTop()
+        repaint(w)
       } else {
         w.hide()
       }
@@ -547,7 +561,12 @@ app.whenReady().then(async () => {
   // Timers live detached by default; renderer sends its saved pref on load.
   createTimerWindow()
 
-  globalShortcut.register('F1', () => broadcast('toggle-collapse'))
+  globalShortcut.register('F1', () => {
+    broadcast('toggle-collapse')
+    // Collapse swaps the full panel for a 44px pull-tab (or back): repaint
+    // so the old large frame can't linger as a ghost.
+    for (const w of allWindows()) repaint(w)
+  })
   globalShortcut.register('F2', () => toggleClickThrough())
   // Tabs left-to-right: F3 Droids, F4 Rebirth, F5 Calculator, F6 Setup, F7 Timers (last)
   globalShortcut.register('F3', () => broadcast('open-tab', 'droids'))
@@ -555,7 +574,10 @@ app.whenReady().then(async () => {
   globalShortcut.register('F5', () => broadcast('open-tab', 'calculator'))
   globalShortcut.register('F6', () => broadcast('open-tab', 'settings'))
   globalShortcut.register('F7', () => broadcast('open-tab', 'timers'))
-  globalShortcut.register('F8', () => broadcast('toggle-collapse'))
+  globalShortcut.register('F8', () => {
+    broadcast('toggle-collapse')
+    for (const w of allWindows()) repaint(w)
+  })
   globalShortcut.register('F10', () => {
     const toInteractive = isClickThrough
     setInteractive(toInteractive)
