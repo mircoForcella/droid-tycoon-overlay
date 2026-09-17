@@ -18,7 +18,7 @@
 // plain files (see scripts/copy-ocr-assets.js) and referenced by explicit
 // paths, because the vite-bundled main process cannot resolve them inside app.asar.
 
-import { app, nativeImage } from 'electron'
+import { app } from 'electron'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { createWorker, Worker } from 'tesseract.js'
@@ -343,9 +343,15 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
   let size = { width: 0, height: 0 }
 
   {
-    const thumb = nativeImage.createFromBuffer(crop.png)
-    size = thumb.getSize()
-    const raw = thumb.toBitmap()
+    // Decode the capture with pngjs, NEVER nativeImage.toBitmap(): toBitmap
+    // returns BGRA-ordered bytes on Windows while every consumer below
+    // (tealMask, templateInk, otsuMask, renderStripColor) reads RGBA. The
+    // swap turned yellow level geometry teal live (17.71% ink on a 1.18%
+    // frame, proven on shot4.png to the digit) while spot.png on disk stayed
+    // correct — which is why the harness (pngjs) read fine and live failed.
+    const img = PNG.sync.read(crop.png)
+    size = { width: img.width, height: img.height }
+    const raw = Buffer.from(img.data)
     for (const stale of ['spot-raw.png', 'spot-cooked.png', 'spot-gamewin.png']) {
       try {
         await fs.unlink(join(capDir, stale))

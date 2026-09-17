@@ -1,4 +1,7 @@
 // Local OCR pipeline test: replicates src/main/ocr.ts + src/main/ppocr.ts exactly.
+// Pixel path fidelity note: the harness decodes with pngjs (true RGBA) and
+// so does ocr.ts since v1.1.3 — an earlier nativeImage.toBitmap() roundtrip
+// fed BGRA live (17.71% ink on a 1.18% frame) while spot.png stayed correct.
 // Usage: node scripts/test-ocr.js <image.png>
 const fs = require('fs')
 const path = require('path')
