@@ -291,11 +291,16 @@ function openSpotWindow(spots: SpotPayload[]) {
     } catch {}
     return
   }
-  const primary = screen.getPrimaryDisplay()
+  // Center the popup on the display the user is AIMING at (cursor position),
+  // not the Windows primary. F9 UX is "aim at the droid": the cursor is on
+  // the game screen by definition, while the primary is often the other
+  // monitor — the old primary-always code opened the popup on the wrong
+  // screen with no way to reach it mid-game.
+  const anchor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const W = 600
   const H = 700
-  const x = Math.round(primary.bounds.x + (primary.bounds.width - W) / 2)
-  const y = Math.max(primary.bounds.y, Math.round(primary.bounds.y + (primary.bounds.height - H) / 2))
+  const x = Math.round(anchor.bounds.x + (anchor.bounds.width - W) / 2)
+  const y = Math.max(anchor.bounds.y, Math.round(anchor.bounds.y + (anchor.bounds.height - H) / 2))
   spotWin = new BrowserWindow({
     x, y, width: W, height: H,
     frame: false,
@@ -573,7 +578,17 @@ app.whenReady().then(async () => {
   // (click-through ON so the game sees the cursor), press F9.
   setupTray()
 
+  // F9 overlap guard: Tesseract fallback can take 12s+ on noisy frames and
+  // users mash F9. Without this, concurrent spotIncomes runs pile up (each
+  // re-running glyphs + PP-OCR + Tesseract) and the log fills with
+  // interleaved passes. One flight at a time; extra presses are ignored.
+  let spotRunning = false
   globalShortcut.register('F9', async () => {
+    if (spotRunning) {
+      log('ocr spot ignored (F9): previous read still running')
+      return
+    }
+    spotRunning = true
     broadcast('spot-status', 'started')
     log('ocr spot started (F9)')
     try {
@@ -583,6 +598,8 @@ app.whenReady().then(async () => {
     } catch (e) {
       log(`ocr error: ${e}`)
       broadcast('income-spots', [])
+    } finally {
+      spotRunning = false
     }
   })
   log('hotkeys registered')

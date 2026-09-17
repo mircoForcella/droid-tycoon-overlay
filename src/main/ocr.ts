@@ -448,6 +448,10 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       // own adaptive thresholding internally. No second debug file: spot.png
       // above is already the exact frame being read.
       // Worker spins up lazily here so earlier hits never pay for it.
+      // Live proved Tesseract can grind 30-47s on noisy frames while the
+      // user mashes F9: hard-timeout the fallback so one bad frame can never
+      // wedge the pipeline (fail fast, keep glyph+PP-OCR lines for the log).
+      const TESS_TIMEOUT_MS = 12000
     const worker = await getWorker()
     const cooked = upscaleRaw(raw, size.width, size.height)
       // Sparse floating labels on a busy 3D background: SINGLE_BLOCK (6) beats
@@ -462,12 +466,28 @@ export async function spotIncomes(displayId: number | null = null): Promise<Spot
       // blocks:true is required — without it tesseract.js returns text only
       // (blocks=null) and every spot collapses to the crop center, making
       // crosshair-distance ranking impossible. Verified on shot1.png.
-      const recognized = await (worker as unknown as {
-        recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
-      }).recognize(cooked, {}, { blocks: true })
-      const tessLines = linesOf((recognized as { data: unknown }).data, size)
+      let recognized: unknown = null
+      try {
+        recognized = await Promise.race([
+          (worker as unknown as {
+            recognize: (img: Buffer, opts?: object, output?: object) => Promise<unknown>
+          }).recognize(cooked, {}, { blocks: true }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('tesseract-timeout')), TESS_TIMEOUT_MS)
+          )
+        ])
+      } catch (e) {
+        // Timeout (or worker fault): do NOT retry — fall through with empty
+        // fallback lines. spots stays empty and the F9 toast reports no text.
+        dbg(`tesseract ${String((e as Error)?.message ?? e).slice(0, 60)} after ${TESS_TIMEOUT_MS}ms — fallback skipped`)
+        pass = `${pass}+tesseract-timeout`
+      }
+      const tessLines = recognized ? linesOf((recognized as { data: unknown }).data, size) : []
       upscale = 2
-      if (glyphExclusionEnabled && claimed.length > 0) {
+      if (!recognized) {
+        // Timed-out fallback: lines keeps the merged glyph+PP-OCR set for
+        // the log sample, spots stays empty, pass keeps the timeout marker.
+      } else if (glyphExclusionEnabled && claimed.length > 0) {
         // Same 2x coord space as the claimed boxes: exclude, never drop
         // silently — the filter only removes centers inside claimed strips.
         const { kept, dropped } = excludeClaimed(tessLines, claimed)

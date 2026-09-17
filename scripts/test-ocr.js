@@ -539,11 +539,21 @@ function upscaleRaw(src, w, h) {
       tessedit_char_whitelist: '0123456789.KkMmBbTtSs/ ',
     })
     const t1 = Date.now()
-    const { data } = await worker.recognize(cooked, {}, { blocks: true })
+    // Mirror ocr.ts: hard-timeout the fallback (live proved 30-47s grinds).
+    let data = null
+    try {
+      const res = await Promise.race([
+        worker.recognize(cooked, {}, { blocks: true }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('tesseract-timeout')), 12000)),
+      ])
+      data = res.data
+    } catch (e) {
+      console.log('tesseract ' + String((e && e.message) || e).slice(0, 60) + ' — fallback skipped')
+    }
     console.log('tesseract in=' + (Date.now() - t1) + 'ms')
     lines = []
-    for (const b of (data.blocks || [])) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) lines.push(l)
-    if (lines.length === 0 && (data.text || '').trim()) {
+    for (const b of ((data && data.blocks) || [])) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) lines.push(l)
+    if (lines.length === 0 && ((data && data.text) || '').trim()) {
       const W = cw * 2, H = ch * 2
       for (const t of data.text.split('\n')) {
         if (t.trim().length === 0) continue
