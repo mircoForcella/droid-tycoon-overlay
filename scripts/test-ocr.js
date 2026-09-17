@@ -266,45 +266,16 @@ function loadGlyphs() {
     const p = PNG.sync.read(fs.readFileSync(path.join(base, m.file)))
     const { ink, ix0, iy0, ix1, iy1 } = templateInk(p.data, p.width, p.height)
     if (ix1 < ix0) continue
-    // luminance kept for NCC diagnostics only (never the gate)
-    const n = p.width * p.height
-    const lum = new Float32Array(n)
-    for (let i = 0; i < n; i++) lum[i] = (p.data[i * 4] + p.data[i * 4 + 1] + p.data[i * 4 + 2]) / 3
     const tw = ix1 - ix0 + 1, th = iy1 - iy0 + 1
     if (!byChar.has(m.char)) byChar.set(m.char, [])
     byChar.get(m.char).push({
-      char: m.char, aspect: tw / th, canon: canonicalize(ink, ix0, iy0, ix1, iy1, p.width), lum,
+      char: m.char, aspect: tw / th, canon: canonicalize(ink, ix0, iy0, ix1, iy1, p.width),
       w: p.width, h: p.height, file: m.file,
     })
   }
   if (byChar.size === 0) throw new Error('no glyph templates')
   _glyphs = byChar
   return byChar
-}
-function resizeGray(g, w, h, W, H) {
-  const out = new Float32Array(W * H)
-  for (let y = 0; y < H; y++) {
-    const sy = Math.min(h - 1, Math.max(0, (y + 0.5) * h / H - 0.5))
-    const yA = Math.floor(sy), yB = Math.min(h - 1, yA + 1), fy = sy - yA
-    for (let x = 0; x < W; x++) {
-      const sx = Math.min(w - 1, Math.max(0, (x + 0.5) * w / W - 0.5))
-      const xA = Math.floor(sx), xB = Math.min(w - 1, xA + 1), fx = sx - xA
-      out[y * W + x] =
-        (g[yA * w + xA] * (1 - fx) + g[yA * w + xB] * fx) * (1 - fy) +
-        (g[yB * w + xA] * (1 - fx) + g[yB * w + xB] * fx) * fy
-    }
-  }
-  return out
-}
-function ncc(a, b) {
-  const n = a.length
-  let ma = 0, mb = 0
-  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i] }
-  ma /= n; mb /= n
-  let sab = 0, saa = 0, sbb = 0
-  for (let i = 0; i < n; i++) { const da = a[i] - ma, db = b[i] - mb; sab += da * db; saa += da * da; sbb += db * db }
-  if (saa < 1e-9 || sbb < 1e-9) return -1
-  return sab / Math.sqrt(saa * sbb)
 }
 function splitGlyphs(mask, W, line) {
   const counts = []

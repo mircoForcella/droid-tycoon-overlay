@@ -1,4 +1,9 @@
 // One-off: cut labeled glyph templates from verified shot strips.
+// ⚠ DO NOT RUN — this rewrites ocr-glyphs/manifest.json from scratch (its own
+// SHOTS only), which would DELETE the 9 manual adoptions, the harvested 5a,
+// and all shot3/shot4 small-scale exemplars. New harvests go through the
+// surgical scripts (scripts/harvest-5a.js, scripts/harvest-small.js), which
+// append without touching existing entries. Kept for reference only.
 // Ground truth (proven by test-ocr runs): each entry maps a shot to the
 // strips it contains, in top-to-bottom order, with their TRUE strings.
 // CC boxes within a strip are assigned left-to-right; count mismatch skips

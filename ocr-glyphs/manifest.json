@@ -197,5 +197,119 @@
   "file": "glyph_5_shot1_29x33_b.png",
   "set": "mint",
   "source": "harvested"
+ },
+ {
+  "char": "1",
+  "file": "glyph_1_shot3_13x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "5",
+  "file": "glyph_5_shot3_20x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": ".",
+  "file": "glyph_dot_shot3_7x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "2",
+  "file": "glyph_2_shot3_21x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "0",
+  "file": "glyph_0_shot3_22x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "K",
+  "file": "glyph_K_shot3_23x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "/s",
+  "file": "glyph_slash-s_shot3_29x22.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "1",
+  "file": "glyph_1_shot3_22x40.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "3",
+  "file": "glyph_3_shot3_38x40.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": ".",
+  "file": "glyph_dot_shot3_12x40.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "B",
+  "file": "glyph_B_shot3_39x40.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "1",
+  "file": "glyph_1_shot4_19x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "1",
+  "file": "glyph_1_shot4_19x33_b.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "5",
+  "file": "glyph_5_shot4_30x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": ".",
+  "file": "glyph_dot_shot4_9x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "2",
+  "file": "glyph_2_shot4_32x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "0",
+  "file": "glyph_0_shot4_32x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "K",
+  "file": "glyph_K_shot4_35x33.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "/s",
+  "file": "glyph_slash-s_shot4_42x33.png",
+  "set": "mint",
+  "source": "harvested"
  }
 ]

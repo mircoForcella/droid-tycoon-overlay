@@ -1,13 +1,8 @@
-// Pool-level scale-coverage sweep (replaces the retired single-template
-// rescale sweep). Old gate: each template vs its own synthetic rescale at
-// factors 0.7-1.4 with worst-case <= 0.10. That measured a calibration
-// property (canonical-grid resampling robustness), not operational coverage —
-// it failed even the shipped 1.1.0 pool while live strips decoded exactly.
-// New gate: every truth-labeled live ROI harvested at native scale across all
-// frames must match SOME pool exemplar of its own char at <= 0.10 (aspect
-// gate applies). PASS = 100% coverage; the valley-less "70" merge in 13.70B
-// is unsegmentable and excluded by design (known gap, tracked separately).
-// Usage: node scripts/eval-sweep.js
+// Small-scale admission eval: verify the 20 shot3/shot4 harvests already in the
+// pool (54 entries) under the variant protocol — utility per new exemplar,
+// confusion (fails / new-steals / margins) over all regression ROIs, and
+// full-frame exact-decode on all 4 frames.
+// Usage: node scripts/eval-small.js
 const fs = require('fs')
 const path = require('path')
 const { PNG } = require('pngjs')
@@ -67,10 +62,10 @@ function loadPool() {
   return manifest.map(m => {
     const p = PNG.sync.read(fs.readFileSync(path.join(base, m.file)))
     const { ink, ix0, iy0, ix1, iy1 } = templateInk(p.data, p.width, p.height)
-    if (ix1 < ix0) return null
+    if (ix1 < ix0) return { char: m.char, file: m.file, blank: true, isNew: /shot[34]/.test(m.file) }
     const tw = ix1 - ix0 + 1, th = iy1 - iy0 + 1
-    return { char: m.char, file: m.file, aspect: tw / th, canon: canonicalize(ink, ix0, iy0, ix1, iy1, p.width) }
-  }).filter(Boolean)
+    return { char: m.char, file: m.file, aspect: tw / th, canon: canonicalize(ink, ix0, iy0, ix1, iy1, p.width), isNew: /shot[34]/.test(m.file) }
+  })
 }
 function tealMask(src, w, h, scale) {
   const W = w * scale, H = h * scale
@@ -136,11 +131,27 @@ function roiOf(mask, W, g) {
   const rw = cx1 - cx0 + 1, rh = cy1 - cy0 + 1
   const obs = new Uint8Array(rw * rh)
   for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) obs[y * rw + x] = mask[(cy0 + y) * 2 * W + ((cx0 + x) * 2)] ? 1 : 0
-  return { rAspect: rw / rh, rCanon: canonicalize(obs, 0, 0, rw - 1, rh - 1, rw), h: rh }
+  return { rAspect: rw / rh, rCanon: canonicalize(obs, 0, 0, rw - 1, rh - 1, rw), w: rw, h: rh }
+}
+function classify(pool, rAspect, rCanon) {
+  const perChar = new Map()
+  for (const t of pool) {
+    if (!t.canon) continue
+    if (Math.abs(t.aspect - rAspect) > ASPECT_GATE) continue
+    const s = canonMismatch(t.canon, rCanon)
+    const e = perChar.get(t.char)
+    if (!e || s < e.score) perChar.set(t.char, { score: s, file: t.file, isNew: t.isNew })
+  }
+  const ranked = [...perChar.entries()].sort((a, b) => a[1].score - b[1].score)
+  if (ranked.length === 0) return { best: '?', bestScore: Infinity, margin: 0, winnerFile: null, winnerNew: false }
+  const [bc, b] = ranked[0]
+  if (b.score > CANON_GATE) return { best: '?', bestScore: b.score, margin: 0, winnerFile: b.file, winnerNew: b.isNew }
+  const margin = ranked.length > 1 ? ranked[1][1].score - b.score : 1 - b.score
+  return { best: bc, bestScore: b.score, margin, winnerFile: b.file, winnerNew: b.isNew }
 }
 
-// Truth-labeled live ROIs at native scale (same regression table as
-// eval-small.js; null = unsegmentable merge, excluded by design).
+// Regression strips: shot1/shot2 legacy `use` + shot3/shot4 explicit `map`
+// (null = valley-less merged part, skipped by design) + /s combo tails.
 const SHOTS = [
   { file: 'shot1.png', lines: [
     { text: '92.80K/s', map: ['9', '2', '.', '8', '0', 'K'], combo: true, box: { x0: 808, y0: 492, x1: 1091, y1: 531 } },
@@ -160,15 +171,11 @@ const SHOTS = [
 ]
 
 const pool = loadPool()
-console.log(`pool=${pool.length}`)
-const byChar = new Map()
-for (const t of pool) {
-  if (!byChar.has(t.char)) byChar.set(t.char, [])
-  byChar.get(t.char).push(t)
-}
+const isNew = (f) => /shot[34]/.test(f)
+console.log(`pool=${pool.length} new=${pool.filter(t => t.isNew).length}`)
 
-let covered = 0, total = 0
-const perChar = new Map() // char -> {worst, worstROI, heights:Set}
+// ---- per-ROI classification over every regression strip ----
+const rois = []
 for (const { file, lines } of SHOTS) {
   const { raw, cw, ch } = frameOf(file)
   const { mask, W } = tealMask(raw, cw, ch, PPOCR_UPSCALE)
@@ -180,28 +187,96 @@ for (const { file, lines } of SHOTS) {
       const tail = parts[parts.length - 1]
       jobs.push({ truth: '/s', g: { x0: tail.x0, x1: tail.x1, y0: best.y0, y1: best.y1 } })
     }
-    for (const { truth, g } of jobs) {
-      total++
+    jobs.forEach(({ truth, g }, i) => {
+      if (!g) { rois.push({ frame: file, strip: want, truth, best: 'MISSING-PART', bestScore: Infinity, margin: 0 }); return }
       const r = roiOf(mask, W, g)
-      let bestS = Infinity, bestF = ''
-      for (const t of byChar.get(truth) || []) {
-        if (Math.abs(t.aspect - r.rAspect) > ASPECT_GATE) continue
-        const s = canonMismatch(t.canon, r.rCanon)
-        if (s < bestS) { bestS = s; bestF = t.file }
-      }
-      const ok = bestS <= CANON_GATE
-      if (ok) covered++
-      if (!perChar.has(truth)) perChar.set(truth, { worst: 0, worstROI: '', heights: new Set() })
-      const pc = perChar.get(truth)
-      pc.heights.add(r.h)
-      if (bestS > pc.worst) { pc.worst = bestS; pc.worstROI = `${file}[${want}]` }
-      console.log(`${ok ? 'covered' : 'GAP'} '${truth}' ${r.h}px ${file}[${want}] best=${bestS === Infinity ? 'GATED-ALL' : bestS.toFixed(3)} via=${bestF || '-'}`)
-    }
+      if (!r) { rois.push({ frame: file, strip: want, truth, best: 'NO-INK', bestScore: Infinity, margin: 0 }); return }
+      const c = classify(pool, r.rAspect, r.rCanon)
+      rois.push({ frame: file, strip: want, truth, ...c, w: r.w, h: r.h })
+    })
   }
 }
-console.log('\nPer-char worst same-char score + native heights covered:')
-for (const [chr, pc] of [...perChar.entries()].sort()) {
-  console.log(`  '${chr}': worst=${pc.worst.toFixed(3)} at ${pc.worstROI} heights=[${[...pc.heights].sort((a, b) => a - b).join(',')}] ${pc.worst <= CANON_GATE ? 'PASS' : 'FAIL'}`)
+let fails = 0, newSteals = 0, minMargin = Infinity
+const winsByFile = {}, stealsByFile = {}
+for (const r of rois) {
+  const ok = r.best === r.truth
+  if (!ok) fails++
+  else {
+    if (r.margin < minMargin) minMargin = r.margin
+    if (r.winnerNew) winsByFile[r.winnerFile] = (winsByFile[r.winnerFile] || 0) + 1
+  }
+  if (r.winnerNew && !ok && r.best !== '?') {
+    newSteals++
+    stealsByFile[r.winnerFile] = (stealsByFile[r.winnerFile] || 0) + 1
+  }
+  const flag = ok ? (r.margin < 0.05 ? ' THIN' : ' OK') : ' FAIL'
+  console.log(`${ok ? 'ok ' : 'FAIL'} ${r.frame} [${r.strip}] truth='${r.truth}' got='${r.best}' score=${r.bestScore === Infinity ? 'inf' : r.bestScore.toFixed(3)} margin=${r.margin.toFixed(3)} via=${r.winnerFile || '-'}${r.winnerNew ? ' (NEW)' : ''}${flag}`)
 }
-console.log(`\nCOVERAGE ${covered}/${total} ${covered === total ? 'PASS' : 'FAIL'}`)
-process.exit(covered === total ? 0 : 1)
+console.log(`\nCONFUSION fails=${fails}/${rois.length} new-steals=${newSteals} minMarginOnCorrect=${minMargin === Infinity ? 'n/a' : minMargin.toFixed(3)}`)
+
+// ---- utility per new exemplar: which ROIs does it win, and did it fix a FAIL? ----
+console.log('\nUTILITY per new exemplar (wins on correct ROIs):')
+for (const t of pool.filter(t => t.isNew && !t.blank)) {
+  const w = winsByFile[t.file] || 0
+  const s = stealsByFile[t.file] || 0
+  console.log(`  ${t.char} ${t.file}: wins=${w} steals=${s} ${w > 0 && s === 0 ? 'KEEP' : (w === 0 ? 'NO-WINS?' : 'REVIEW')}`)
+}
+// new files that never win anything are dead weight — list for removal review
+const dead = pool.filter(t => t.isNew && !t.blank && !winsByFile[t.file] && !stealsByFile[t.file]).map(t => t.file)
+console.log(`\nDEAD (never wins, never steals): ${dead.length ? dead.join(', ') : 'none'}`)
+
+// ---- full-frame exact decode on all 4 frames ----
+function decodeFrame(imgPath) {
+  const { raw, cw, ch } = frameOf(imgPath)
+  const { mask, W, H } = tealMask(raw, cw, ch, PPOCR_UPSCALE)
+  const seen = new Uint8Array(W * H)
+  const boxes = [], stack = []
+  for (let i = 0; i < W * H; i++) {
+    if (!mask[i] || seen[i]) continue
+    let x0 = W, y0 = H, x1 = -1, y1 = -1, area = 0
+    stack.push(i); seen[i] = 1
+    while (stack.length) {
+      const p = stack.pop(), x = p % W, y = (p / W) | 0
+      if (x < x0) x0 = x; if (x > x1) x1 = x
+      if (y < y0) y0 = y; if (y > y1) y1 = y
+      area++
+      if (x > 0 && mask[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; stack.push(p - 1) }
+      if (x < W - 1 && mask[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; stack.push(p + 1) }
+      if (y > 0 && mask[p - W] && !seen[p - W]) { seen[p - W] = 1; stack.push(p - W) }
+      if (y < H - 1 && mask[p + W] && !seen[p + W]) { seen[p + W] = 1; stack.push(p + W) }
+    }
+    if ((y1 - y0 + 1) >= 8 && (x1 - x0 + 1) >= 3 && area >= 30) boxes.push({ x0, y0, x1, y1 })
+  }
+  const sorted = [...boxes].sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0)
+  const lines = []
+  for (const b of sorted) {
+    const cy = (b.y0 + b.y1) / 2
+    let ln = lines.find(L => Math.abs(((L.y0 + L.y1) / 2) - cy) < 18)
+    if (!ln) { ln = { x0: 1e9, y0: 1e9, x1: -1, y1: -1 }; lines.push(ln) }
+    ln.x0 = Math.min(ln.x0, b.x0); ln.y0 = Math.min(ln.y0, b.y0)
+    ln.x1 = Math.max(ln.x1, b.x1); ln.y1 = Math.max(ln.y1, b.y1)
+  }
+  const out = []
+  for (const line of lines.filter(L => (L.x1 - L.x0) >= 20)) {
+    let text = ''
+    for (const gbox of splitParts(mask, W, line)) {
+      const r = roiOf(mask, W, gbox)
+      if (!r) continue
+      text += classify(pool, r.rAspect, r.rCanon).best
+    }
+    if (text.length > 0) out.push(text)
+  }
+  return out
+}
+console.log('\nFULL-FRAME glyph lines (pool-${pool.length}):')
+const EXPECT = {
+  'shot1.png': ['92.80K/s', '15.50B'],
+  'shot2.png': ['92.80K/s', '1.30B'],
+  'shot3.png': ['115.20K/s'], // 13.70B blocked on valley-less 70 merge (known gap)
+  'shot4.png': ['115.20K/s'],
+}
+for (const [f, want] of Object.entries(EXPECT)) {
+  const got = decodeFrame(f)
+  const missing = want.filter(s => !got.includes(s))
+  console.log(`  ${f}: ${JSON.stringify(got)} expect=${JSON.stringify(want)} ${missing.length === 0 ? 'EXACT' : 'MISSING ' + missing.join(',')}`)
+}
