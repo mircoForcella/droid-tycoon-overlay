@@ -5,6 +5,10 @@ ocr-assets/
 ocr-models/
 eng.traineddata
 test-cooked.png
+# Private F9 frames (never pushed; crops in ocr-glyphs/ are the public record)
+shot1.png
+shot2.png
+ocrbox.png
 dist.log
 templates/*.png
 templates/*.jpg

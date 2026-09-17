@@ -163,7 +163,18 @@ for (const { file, lines } of SHOTS) {
       const cx1 = Math.ceil(g.x1 / PPOCR_UPSCALE), cy1 = Math.ceil(g.y1 / PPOCR_UPSCALE)
       const gw = cx1 - cx0 + 1, gh = cy1 - cy0 + 1
       const safe = { '/': 'slash', '/s': 'slash-s', '.': 'dot' }[ch] || ch
-      const name = `glyph_${safe}_${tag}_${gw}x${gh}.png`
+      // Same-char/same-dims repeats (e.g. the two 5s in 15.50B) must NEVER
+      // collide: later writes used to silently overwrite earlier crops while
+      // the manifest kept a single entry. Suffix _b/_c… so every harvest is
+      // its own exemplar file + manifest entry (variant coverage, not dedupe).
+      let name = `glyph_${safe}_${tag}_${gw}x${gh}.png`
+      if (seen.has(ch + name) || fs.existsSync(path.join(outDir, name))) {
+        let k = 98 // 'b'
+        while (seen.has(ch + name) || fs.existsSync(path.join(outDir, name))) {
+          name = `glyph_${safe}_${tag}_${gw}x${gh}_${String.fromCharCode(k)}.png`
+          k++
+        }
+      }
       const out = new PNG({ width: gw, height: gh })
       for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
         const si = ((cy0 + y) * cw + (cx0 + x)) * 4

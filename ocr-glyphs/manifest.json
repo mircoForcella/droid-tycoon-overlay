@@ -137,59 +137,65 @@
   "set": "mint",
   "source": "harvested"
  },
-  {
-   "char": "B",
-   "file": "glyph_B_shot2_28x30.png",
-   "set": "mint",
-   "source": "harvested"
-  },
-  {
-   "char": "0",
-   "file": "zero.png",
-   "source": "manual"
-  },
-  {
-   "char": "1",
-   "file": "one.png",
-   "source": "manual"
-  },
-  {
-   "char": "3",
-   "file": "three.png",
-   "source": "manual"
-  },
-  {
-   "char": "8",
-   "file": "eight.png",
-   "source": "manual"
-  },
-  {
-   "char": "K",
-   "file": "K.png",
-   "source": "manual"
-  },
-  {
-   "char": "4",
-   "file": "four.png",
-   "source": "manual",
-   "provisional": true
-  },
-  {
-   "char": "6",
-   "file": "six.png",
-   "source": "manual",
-   "provisional": true
-  },
-  {
-   "char": "7",
-   "file": "seven.png",
-   "source": "manual",
-   "provisional": true
-  },
-  {
-   "char": "M",
-   "file": "M.png",
-   "source": "manual",
-   "provisional": true
-  }
+ {
+  "char": "B",
+  "file": "glyph_B_shot2_28x30.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "0",
+  "file": "zero.png",
+  "source": "manual"
+ },
+ {
+  "char": "1",
+  "file": "one.png",
+  "source": "manual"
+ },
+ {
+  "char": "3",
+  "file": "three.png",
+  "source": "manual"
+ },
+ {
+  "char": "8",
+  "file": "eight.png",
+  "source": "manual"
+ },
+ {
+  "char": "K",
+  "file": "K.png",
+  "source": "manual"
+ },
+ {
+  "char": "4",
+  "file": "four.png",
+  "source": "manual",
+  "provisional": true
+ },
+ {
+  "char": "6",
+  "file": "six.png",
+  "source": "manual",
+  "provisional": true
+ },
+ {
+  "char": "7",
+  "file": "seven.png",
+  "source": "manual",
+  "provisional": true
+ },
+ {
+  "char": "M",
+  "file": "M.png",
+  "source": "manual",
+  "provisional": true
+ },
+ {
+  "char": "5",
+  "file": "glyph_5_shot1_29x33_b.png",
+  "set": "mint",
+  "source": "harvested"
+ }
 ]
