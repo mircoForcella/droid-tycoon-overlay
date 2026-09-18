@@ -570,6 +570,14 @@ function setupTray() {
   log('tray ready')
 }
 
+// Software compositing: the "printed window" (a static painted hub copy that
+// survives every window-logic fix — single instance, no focus yank,
+// hidden-swap rebuilds, persisted filter) is compositor-side DWM staleness on
+// transparent always-on-top windows. invalidate() repaints could only clear
+// transition frames; disabling GPU compositing removes the stale-frame class
+// entirely. Must run before app.ready; CPU cost is negligible for this UI.
+app.disableHardwareAcceleration()
+
 // Single instance: a second launch (double-clicked shortcut while running)
 // used to boot a FULL second app — its own overlay windows on every monitor
 // (filter defaults to 'all' until the saved primary-only pref re-applies,
