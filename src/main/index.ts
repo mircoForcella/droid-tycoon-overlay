@@ -136,6 +136,7 @@ let displayFilter: 'all' | number = (() => {
 function buildWindow(x: number, y: number, w: number, h: number): BrowserWindow {
   const win = new BrowserWindow({
     x, y, width: w, height: h,
+    show: false, // shown on first paint by recreateWindows (swap, below)
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -167,18 +168,17 @@ function createOverlayWindows() {
 
 let appQuitting = false
 
-function destroyWindows() {
-  for (const w of windows) {
-    try {
-      w.removeAllListeners('closed')
-      w.destroy()
-    } catch {}
-  }
-  windows = []
-}
+app.on('before-quit', () => {
+  appQuitting = true
+  log(`app quitting pid=${process.pid}`)
+})
 
 // Build the new set BEFORE tearing down the old one, so a transient
 // display event can never leave zero windows (which would quit the app).
+// Swap without overlap flash: fresh windows start hidden and are shown on
+// first paint, and only then is the old set retired. Showing fresh windows
+// immediately (and destroying old ones after) flashed double panels on every
+// rebuild — "another main on top of the main".
 function recreateWindows() {
   const fresh: BrowserWindow[] = []
   try {
@@ -196,11 +196,36 @@ function recreateWindows() {
     log(`recreate failed: ${e}`)
     return
   }
-  destroyWindows()
+  const old = windows
   windows = fresh
   applyClickThrough()
-  for (const w of windows) repaint(w)
-  log(`overlay windows recreated: ${windows.length}`)
+  let pending = fresh.length
+  let swapped = false
+  const swap = () => {
+    if (swapped) return
+    swapped = true
+    for (const w of fresh) {
+      try {
+        if (isVisible) {
+          if (!w.isVisible()) w.show()
+          repaint(w)
+        }
+      } catch {}
+    }
+    for (const w of old) {
+      try {
+        w.removeAllListeners('closed')
+        w.destroy()
+      } catch {}
+    }
+  }
+  const onPaint = () => {
+    pending--
+    if (pending <= 0) swap()
+  }
+  for (const w of fresh) w.once('ready-to-show', onPaint)
+  setTimeout(swap, 3000) // fallback: a hung load must never leave the overlay invisible
+  log(`overlay windows recreated: ${fresh.length}`)
 }
 
 // Floating timer window: frameless, no chrome, just the 3 rectangles.
