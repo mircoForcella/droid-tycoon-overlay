@@ -6,7 +6,10 @@
 // Count mismatch (after one forced valley-split attempt) skips the strip:
 // never mislabel.
 // Usage: node scripts/harvest-small.js inspect   (dry run, no writes)
-//        node scripts/harvest-small.js cut       (write crops + manifest)
+//        node scripts/harvest-small.js cut [shotN] (write crops + manifest;
+//          optional shotN filter limits to that frame — ALWAYS use it when
+//          adding a new frame, since re-cutting is deterministic and would
+//          otherwise duplicate every existing harvest under _b/_c names)
 const fs = require('fs'), path = require('path')
 const { PNG } = require('pngjs')
 
@@ -36,6 +39,16 @@ const STRIPS = [
   { file: 'shot3.png', box: { x0: 830, y0: 422, x1: 1157, y1: 463 }, text: '115.20K/s', map: ['1', '1', '5', '.', '2', '0', 'K'], combo: true },
   { file: 'shot3.png', box: { x0: 686, y0: 842, x1: 1097, y1: 919 }, text: '13.70B', map: ['1', '3', '.', null, 'B'], combo: false },
   { file: 'shot4.png', box: { x0: 762, y0: 434, x1: 1255, y1: 497 }, text: '115.20K/s', map: ['1', '1', '5', '.', '2', '0', 'K'], combo: true },
+  // shot5 = live spot.png (2026-09-17 23:42Z F9 crop, 900x600): PP-OCR reads
+  // 637.50K/s exact. Column-profile proven: dot+5 touch with NO valley
+  // (monotonic 14->54 rise, x938-950). Harvested as a '.5' COMBO template
+  // (same mechanism as '/s': the manifest char string emits both chars) —
+  // REQUIRED, not optional: without it the blob classifies as '5' at 0.088
+  // and the strip phantom-claims "63750K/s", excluding PP-OCR's correct read.
+  // Rule: combo-harvest only when the merge otherwise decodes UNSAFE
+  // (phantom-parseable); safe-'?' merges (70 in 13.70B) stay skipped.
+  // The "501.30E" strip is unverifiable PP-OCR junk — never touched.
+  { file: 'shot5.png', box: { x0: 722, y0: 462, x1: 1209, y1: 523 }, text: '637.50K/s', map: ['6', '3', '7', '.5', '0', 'K'], combo: true },
 ]
 
 function segment(mask, W, best) {
@@ -83,9 +96,25 @@ function segment(mask, W, best) {
 }
 
 const mode = process.argv[2] || 'inspect'
+const onlyFile = process.argv[3] || null
+// Content-hash idempotency: cut() is deterministic (same box -> same pixels),
+// so re-running must be a no-op. Index every existing crop by its raw RGBA
+// hash once; cut() skips any crop whose pixels already exist under any name.
+// (Filename dedupe alone re-cuts twins as _b/_c duplicates — proven 2026-09-18.)
+const crypto = require('crypto')
 const outDir = path.join(__dirname, '..', 'ocr-glyphs')
 const mp = path.join(outDir, 'manifest.json')
 const manifest = JSON.parse(fs.readFileSync(mp, 'utf8'))
+const knownPixels = new Set()
+if (mode !== 'inspect') {
+  for (const f of fs.readdirSync(outDir)) {
+    if (!/\.png$/i.test(f)) continue
+    try {
+      const p = PNG.sync.read(fs.readFileSync(path.join(outDir, f)))
+      knownPixels.add(crypto.createHash('sha256').update(Buffer.from(p.data)).digest('hex'))
+    } catch {}
+  }
+}
 const cache = {}
 
 function frameOf(file) {
@@ -101,7 +130,7 @@ function cut(raw, cw, g, ch, tag) {
   const cx0 = Math.floor(g.x0 / PPOCR_UPSCALE), cy0 = Math.floor(g.y0 / PPOCR_UPSCALE)
   const cx1 = Math.ceil(g.x1 / PPOCR_UPSCALE), cy1 = Math.ceil(g.y1 / PPOCR_UPSCALE)
   const gw = cx1 - cx0 + 1, gh = cy1 - cy0 + 1
-  const safe = { '/': 'slash', '/s': 'slash-s', '.': 'dot' }[ch] || ch
+  const safe = { '/': 'slash', '/s': 'slash-s', '.': 'dot', '.5': 'dot-5' }[ch] || ch
   let name = `glyph_${safe}_${tag}_${gw}x${gh}.png`
   if (manifest.some(m => m.file === name) || fs.existsSync(path.join(outDir, name))) {
     let k = 98 // 'b'
@@ -115,12 +144,17 @@ function cut(raw, cw, g, ch, tag) {
     const si = ((cy0 + y) * cw + (cx0 + x)) * 4, oi = (y * gw + x) * 4
     out.data[oi] = raw[si]; out.data[oi + 1] = raw[si + 1]; out.data[oi + 2] = raw[si + 2]; out.data[oi + 3] = 255
   }
+  // Idempotent: identical pixels already in the pool are NEVER re-cut.
+  const digest = crypto.createHash('sha256').update(Buffer.from(out.data)).digest('hex')
+  if (knownPixels.has(digest)) { console.log(`  SKIP '${ch}' ${gw}x${gh} (identical pixels already pooled)`); return }
+  knownPixels.add(digest)
   fs.writeFileSync(path.join(outDir, name), PNG.sync.write(out))
   manifest.push({ char: ch, file: name, set: 'mint', source: 'harvested' })
   console.log(`  CUT '${ch}' ${gw}x${gh} -> ${name}`)
 }
 
 for (const { file, box: best, text: want, map, combo } of STRIPS) {
+  if (onlyFile && file !== onlyFile) continue
   const { raw, cw, ch } = frameOf(file)
   const { mask, W } = tealMask(raw, cw, ch, PPOCR_UPSCALE)
   const { parts } = segment(mask, W, best)

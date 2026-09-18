@@ -157,6 +157,10 @@ const SHOTS = [
   { file: 'shot4.png', lines: [
     { text: '115.20K/s', map: ['1', '1', '5', '.', '2', '0', 'K'], combo: true, box: { x0: 762, y0: 434, x1: 1255, y1: 497 } },
   ] },
+  // shot5 = live spot.png (2026-09-17 23:42Z F9 crop): first harvested 6/7.
+  { file: 'shot5.png', lines: [
+    { text: '637.50K/s', map: ['6', '3', '7', '.5', '0', 'K'], combo: true, box: { x0: 722, y0: 462, x1: 1209, y1: 523 } },
+  ] },
 ]
 
 const pool = loadPool()

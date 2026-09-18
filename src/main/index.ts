@@ -279,18 +279,17 @@ let spotWin: BrowserWindow | null = null
 let pendingSpots: SpotPayload[] = []
 let spotReqSeq = 0
 const spotReqs = new Map<number, (res: { ok: boolean; message: string }) => void>()
-// True when WE flipped to interactive for the spot window (so close hands
-// the mouse back to the game). Untouched when the user was already typing.
-let spotRestoreGame = false
 
 function openSpotWindow(spots: SpotPayload[]) {
   pendingSpots = spots
-  // The popup is useless if the mouse is still captured by the game:
-  // free the cursor on open (same as F2 panel mode).
-  if (isClickThrough) {
-    setInteractive(true)
-    spotRestoreGame = true
-  }
+  // The popup stands alone: it is its own focusable window with mouse events
+  // enabled, its own focus() call below, and popup-scoped digit/Enter/Escape
+  // keys via globalShortcut (they fire no matter which window has focus).
+  // The overlay panels are deliberately left untouched — flipping them to
+  // interactive here used to yank every panel window to the foreground on
+  // every monitor (w.focus() per window) on each F9 match, which reads as
+  // "the overlay opening on both monitors". Panels stay click-through and
+  // exactly as they were (minimized stays minimized) while the popup works.
   if (spotWin && !spotWin.isDestroyed()) {
     try {
       spotWin.setIgnoreMouseEvents(false)
@@ -366,10 +365,6 @@ function closeSpotWindow() {
     spotWin?.destroy()
   } catch {}
   spotWin = null
-  if (spotRestoreGame) {
-    spotRestoreGame = false
-    setInteractive(false)
-  }
 }
 
 // Ephemeral drive for the spot window: digits pick, Enter confirms,
@@ -538,6 +533,26 @@ function setupTray() {
   tray.setContextMenu(menu)
   tray.on('click', () => toggleVisibility())
   log('tray ready')
+}
+
+// Single instance: a second launch (double-clicked shortcut while running)
+// used to boot a FULL second app — its own overlay windows on every monitor
+// (filter defaults to 'all' until the saved primary-only pref re-applies,
+// and the second renderer sometimes never gets that far), its own tray icon,
+// and stolen/duplicated global hotkeys. Hand off to the running instance
+// instead: nudge its windows to the top so the launch visibly "did something".
+const gotSingleLock = app.requestSingleInstanceLock()
+if (!gotSingleLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    log('second launch ignored (single instance)')
+    for (const w of allWindows()) {
+      try {
+        if (!w.isDestroyed() && w.isVisible()) w.moveTop()
+      } catch {}
+    }
+  })
 }
 
 app.whenReady().then(async () => {

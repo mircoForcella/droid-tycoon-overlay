@@ -311,5 +311,47 @@
   "file": "glyph_slash-s_shot4_42x33.png",
   "set": "mint",
   "source": "harvested"
+ },
+ {
+  "char": "6",
+  "file": "glyph_6_shot5_29x32.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "3",
+  "file": "glyph_3_shot5_29x32.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "7",
+  "file": "glyph_7_shot5_37x32.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "0",
+  "file": "glyph_0_shot5_31x32.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "K",
+  "file": "glyph_K_shot5_33x32.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": "/s",
+  "file": "glyph_slash-s_shot5_41x32.png",
+  "set": "mint",
+  "source": "harvested"
+ },
+ {
+  "char": ".5",
+  "file": "glyph_dot-5_shot5_28x32.png",
+  "set": "mint",
+  "source": "harvested"
  }
 ]

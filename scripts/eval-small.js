@@ -168,6 +168,11 @@ const SHOTS = [
   { file: 'shot4.png', lines: [
     { text: '115.20K/s', map: ['1', '1', '5', '.', '2', '0', 'K'], combo: true, box: { x0: 762, y0: 434, x1: 1255, y1: 497 } },
   ] },
+  // shot5 = live spot.png (2026-09-17 23:42Z F9 crop): PP-OCR reads 637.50K/s
+  // exact. Dot+5 touch valley-less (null-skip); first harvested 6 and 7.
+  { file: 'shot5.png', lines: [
+    { text: '637.50K/s', map: ['6', '3', '7', '.5', '0', 'K'], combo: true, box: { x0: 722, y0: 462, x1: 1209, y1: 523 } },
+  ] },
 ]
 
 const pool = loadPool()
@@ -268,12 +273,13 @@ function decodeFrame(imgPath) {
   }
   return out
 }
-console.log('\nFULL-FRAME glyph lines (pool-${pool.length}):')
+console.log('\nFULL-FRAME glyph lines (pool-60):')
 const EXPECT = {
   'shot1.png': ['92.80K/s', '15.50B'],
   'shot2.png': ['92.80K/s', '1.30B'],
   'shot3.png': ['115.20K/s'], // 13.70B blocked on valley-less 70 merge (known gap)
   'shot4.png': ['115.20K/s'],
+  'shot5.png': ['637.50K/s'],
 }
 for (const [f, want] of Object.entries(EXPECT)) {
   const got = decodeFrame(f)
