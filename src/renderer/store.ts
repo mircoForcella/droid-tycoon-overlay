@@ -75,7 +75,6 @@ interface AppState {
   clearAll: () => void
   toggleC3PO: () => void
   setClickThrough: (value: boolean) => void
-  toggleCollapsed: () => void
   setCollapsed: (v: boolean) => void
   setLiveScan: (v: boolean) => void
   setScanIntervalMs: (ms: number) => void
@@ -208,9 +207,16 @@ export const useStore = create<AppState>()(
 
       toggleC3PO: () => set((state) => ({ hasC3PO: !state.hasC3PO })),
 
-      setClickThrough: (value) => set({ clickThrough: value }),
-
-      toggleCollapsed: () => set((state) => ({ collapsed: !state.collapsed })),
+      setClickThrough: (value) => {
+        // Two-way binding with the main process: the Settings checkbox drives
+        // this directly, and without the notify the window flags would never
+        // follow (UI says game-mode, window still eats clicks — or reverse).
+        // Loop-safe: main echoes back via broadcast, which lands here with an
+        // unchanged value and returns on the guard.
+        if (get().clickThrough === value) return
+        set({ clickThrough: value })
+        window.electronAPI?.setClickThrough(value)
+      },
 
       setCollapsed: (v) => set({ collapsed: v }),
 

@@ -76,7 +76,20 @@ function App() {
     if (api) {
       unsubs.push(api.onClickThroughChanged(setClickThrough))
       unsubs.push(api.onOpenTab((tab) => useStore.getState().setActiveTab(tab as AppState['activeTab'])))
-      unsubs.push(api.onToggleCollapse(() => useStore.getState().toggleCollapsed()))
+      // Symmetric minimize (F1): collapsing hands the mouse back to the game,
+      // expanding hands it to the panel — one key, no F2 needed either way.
+      // This also closes a trap: an interactive-but-minimized window is a
+      // fullscreen invisible click-eater, so minimize always means game mode.
+      unsubs.push(api.onToggleCollapse(() => {
+        const st = useStore.getState()
+        if (st.collapsed) {
+          st.setCollapsed(false)
+          st.setClickThrough(false)
+        } else {
+          st.setCollapsed(true)
+          st.setClickThrough(true)
+        }
+      }))
       // Research mode (F10 / Enter): land interactive on the rebirth search.
       // Repeat press while the search already has focus wipes the query for a
       // fresh research — renderer-decided by focus, no press counting in main.
@@ -213,7 +226,11 @@ function App() {
       // arrows itself and confirms with Enter).
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented) {
         const st = useStore.getState()
-        if (st.activeTab === 'rebirth' && !st.pickerSlot && !st.collapsed && !inField) {
+        // Arrows stay live even while typing in the rebirth search (digits
+        // must still type, so only arrows get the exception — caret Up/Down
+        // in that one single-line input is the accepted cost).
+        const inRebirthSearch = tag === 'INPUT' && t?.id === 'rebirth-search'
+        if (st.activeTab === 'rebirth' && !st.pickerSlot && !st.collapsed && (!inField || inRebirthSearch)) {
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault()
             const p = st.rebirthPath
@@ -221,7 +238,7 @@ function App() {
             st.setRebirthProgress(p, prog + (e.key === 'ArrowUp' ? -1 : 1))
             return
           }
-          if (/^[1-5]$/.test(e.key)) {
+          if (!inField && /^[1-5]$/.test(e.key)) {
             st.setRebirthPath(Number(e.key))
             return
           }
@@ -252,8 +269,8 @@ function App() {
       <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
         <button
           className="icon-btn"
-          title="Expand overlay (F8)"
-          onClick={() => useStore.getState().setCollapsed(false)}
+          title="Expand overlay (F1)"
+          onClick={() => { useStore.getState().setCollapsed(false); useStore.getState().setClickThrough(false) }}
           style={{ width: 44, height: 44, fontSize: 22, borderRadius: 10, background: 'rgba(10,10,20,0.92)', borderColor: 'var(--gold)' }}
         >🤖</button>
       </div>

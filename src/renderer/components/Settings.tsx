@@ -138,14 +138,13 @@ export function Settings() {
         <span className="settings-label">Hotkeys</span>
       </div>
       <div className="hotkey-hint">
-        <kbd>F1</kbd> Toggle Overlay Visibility<br/>
+        <kbd>F1</kbd> Minimize to tab (mouse back to game) / Expand + interact<br/>
         <kbd>F2</kbd> Toggle Click-Through<br/>
         <kbd>F3</kbd> Droids Tab<br/>
         <kbd>F4</kbd> Rebirth Tab<br/>
         <kbd>F5</kbd> Calculator Tab<br/>
         <kbd>F6</kbd> Setup Tab<br/>
         <kbd>F7</kbd> Timers Tab (last)<br/>
-        <kbd>F8</kbd> Collapse / Expand Pull-Tab<br/>
         <kbd>F9</kbd> Spot hover income/s (no mouse move needed)<br/>
         <kbd>F10</kbd> Research (focus search / press again to clear)<br/>
         <kbd>↑</kbd><kbd>↓</kbd> Rebirth step back/forward (Rebirth tab) • <kbd>1</kbd>–<kbd>5</kbd> Path buttons (Rebirth tab)<br/>

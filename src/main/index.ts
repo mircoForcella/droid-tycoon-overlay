@@ -633,10 +633,7 @@ app.whenReady().then(async () => {
   globalShortcut.register('F5', () => broadcast('open-tab', 'calculator'))
   globalShortcut.register('F6', () => broadcast('open-tab', 'settings'))
   globalShortcut.register('F7', () => broadcast('open-tab', 'timers'))
-  globalShortcut.register('F8', () => {
-    broadcast('toggle-collapse')
-    for (const w of allWindows()) repaint(w)
-  })
+  // (F8 removed: it duplicated F1 exactly. Slot intentionally left free.)
   // F10 research mode: always land interactive on the rebirth search (or the
   // picker search when a selection is armed). Repeat press wipes the query
   // for a fresh research — renderer-decided by focus, main just re-fires.
