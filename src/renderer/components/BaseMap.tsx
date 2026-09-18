@@ -4,6 +4,7 @@ import { getSlotsByCategory, BaseSlot } from '../data/droids'
 import { DROIDS, DroidDef, Quality, QUALITIES, getSellValue, formatCredits, getDroidDef } from '../data/droidValues'
 import { getIncome, formatIncome, parseIncome, findByIncome } from '../data/income'
 import { PaintTag, TierTag } from './RarityTags'
+import { getDroidCard } from '../data/droidCards'
 
 export function LiveScanBar() {
   const { liveScan, scanIntervalMs } = useStore()
@@ -64,7 +65,9 @@ export function LiveScanBar() {
             if (!def) return null
             return (
               <div key={`${sg.slotId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', background: 'rgba(255,200,50,0.08)', border: '1px solid var(--border)', borderRadius: 4 }}>
-                <span>{def.icon}</span>
+                {getDroidCard(def.id)
+                  ? <img src={getDroidCard(def.id)} alt={def.name} className="scan-card" />
+                  : <span>{def.icon}</span>}
                 <span style={{ flex: 1 }}>{def.name} <span style={{ color: 'var(--text-dim)' }}>→ {sg.slotId} ({Math.round(sg.confidence * 100)}%)</span></span>
                 <button className="icon-btn" style={{ width: 'auto', padding: '2px 10px', fontSize: 11, borderColor: 'var(--green)', color: 'var(--green)' }}
                   onClick={() => useStore.getState().acceptSuggestion(i)}>✓</button>
@@ -202,7 +205,11 @@ export function DroidPickerModal({ isOpen, onClose, onSelect, category }: {
               onMouseEnter={() => setActiveIdx(ri)}
               onClick={() => { onSelect(d, q); onClose(); }}
             >
-              <div className="droid-option-icon">{d.icon}</div>
+              <div className="droid-option-icon">
+                {getDroidCard(d.id)
+                  ? <img src={getDroidCard(d.id)} alt={d.name} className="droid-option-card" />
+                  : d.icon}
+              </div>
               <div className="droid-option-name">{d.name}</div>
               <div className="droid-option-value" style={{ display: 'flex', gap: 4, justifyContent: 'center', alignItems: 'center' }}>
                 <TierTag tier={d.tier} />
@@ -291,7 +298,9 @@ export function BaseMap() {
               <span className="slot-category">{placed ? `${placed.def.tier} ${placed.quality}` : category}</span>
               {placed ? (
                 <>
-                  <span className="slot-icon">{placed.def.icon}</span>
+                  {getDroidCard(placed.def.id)
+                    ? <img src={getDroidCard(placed.def.id)} alt={placed.def.name} className="slot-card" />
+                    : <span className="slot-icon">{placed.def.icon}</span>}
                   <span className="slot-name">{placed.def.name}</span>
                   <span className="slot-value">{formatCredits(placed.sell)}{placed.auto && placed.confidence ? ` ✨${Math.round(placed.confidence * 100)}%` : ''}</span>
                 </>

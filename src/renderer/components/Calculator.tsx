@@ -1,5 +1,6 @@
 import { useStore, formatCredits } from '../store'
 import { getIncome, formatIncome } from '../data/income'
+import { getDroidCard } from '../data/droidCards'
 
 export function Calculator() {
   const { hasC3PO, toggleC3PO, getTotalSellValue, getTotalIncome, getDroidsByCategory } = useStore()
@@ -52,7 +53,7 @@ export function Calculator() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {droids.map(({ slotId, def, quality, sell }) => (
               <div key={slotId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 8px', background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
-                <span>{def.icon} {def.name} <span style={{ color: 'var(--text-dim)' }}>{def.tier} {quality}</span></span>
+                <span>{getDroidCard(def.id) ? <img src={getDroidCard(def.id)} alt={def.name} className="calc-card" /> : def.icon} {def.name} <span style={{ color: 'var(--text-dim)' }}>{def.tier} {quality}</span></span>
                 <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{formatCredits(hasC3PO ? sell * 2 : sell)}</span>
               </div>
             ))}
