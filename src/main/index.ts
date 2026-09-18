@@ -121,7 +121,17 @@ async function manualCheckForUpdates(): Promise<void> {
   }
 }
 
-let displayFilter: 'all' | number = 'all'
+let displayFilter: 'all' | number = (() => {
+  // Main-side persistence: windows must boot on the right display even if a
+  // renderer never boots far enough to re-send its saved choice (observed on
+  // duplicate launches: 2 windows, both monitors, no filter line ever).
+  try {
+    const saved = prefs.get('displayFilter', 'all') as 'all' | number
+    return saved === 'all' || typeof saved === 'number' ? saved : 'all'
+  } catch {
+    return 'all'
+  }
+})()
 
 function buildWindow(x: number, y: number, w: number, h: number): BrowserWindow {
   const win = new BrowserWindow({
@@ -545,6 +555,7 @@ const gotSingleLock = app.requestSingleInstanceLock()
 if (!gotSingleLock) {
   app.quit()
 } else {
+  log(`single-instance lock acquired pid=${process.pid}`)
   app.on('second-instance', () => {
     log('second launch ignored (single instance)')
     for (const w of allWindows()) {
@@ -556,7 +567,7 @@ if (!gotSingleLock) {
 }
 
 app.whenReady().then(async () => {
-  log(`app ready, packaged=${app.isPackaged}`)
+  log(`app ready, packaged=${app.isPackaged} pid=${process.pid} filter=${displayFilter}`)
   setupAutoUpdater()
 
   const fs = await import('fs/promises')
@@ -693,6 +704,9 @@ app.whenReady().then(async () => {
   ipcMain.on('set-overlay-display', (_, value: 'all' | number) => {
     if (displayFilter === value) return // fresh panels re-send the saved choice; no rebuild needed
     displayFilter = value
+    try {
+      prefs.set('displayFilter', value)
+    } catch {}
     recreateWindows()
     log(`overlay display filter=${value}`)
   })

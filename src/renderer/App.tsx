@@ -65,6 +65,14 @@ function App() {
   useEffect(() => {
     const api = window.electronAPI
     const unsubs: Array<() => void> = []
+    // Re-apply the saved monitor choice FIRST, defensively and before any
+    // subscription below can throw: a window that never sends this boots (and
+    // stays) on every monitor. Main also persists the choice itself, so this
+    // is the second layer, not the only one.
+    try {
+      const pref = useStore.getState().overlayDisplay
+      if (pref !== 'all') api?.setOverlayDisplay(Number(pref))
+    } catch {}
     if (api) {
       unsubs.push(api.onClickThroughChanged(setClickThrough))
       unsubs.push(api.onOpenTab((tab) => useStore.getState().setActiveTab(tab as AppState['activeTab'])))
@@ -171,9 +179,6 @@ function App() {
     // used to force-expand all of them — full duplicate panel on screen 2).
     // Fresh installs boot expanded once via the store default (collapsed:
     // false); after that the user's saved state rules every window.
-    // Re-apply saved monitor choice (main starts with 'all')
-    const pref = useStore.getState().overlayDisplay
-    if (pref !== 'all') api?.setOverlayDisplay(Number(pref))
     // Re-apply saved timer placement (main starts detached)
     if (!useStore.getState().timersDetached) api?.setTimersDetached(false)
     return () => {
