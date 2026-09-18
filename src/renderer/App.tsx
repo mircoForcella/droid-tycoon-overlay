@@ -76,15 +76,14 @@ function App() {
     if (api) {
       unsubs.push(api.onClickThroughChanged(setClickThrough))
       unsubs.push(api.onOpenTab((tab) => useStore.getState().setActiveTab(tab as AppState['activeTab'])))
-      // Symmetric minimize (F1): collapsing hands the mouse back to the game,
-      // expanding hands it to the panel — one key, no F2 needed either way.
-      // This also closes a trap: an interactive-but-minimized window is a
-      // fullscreen invisible click-eater, so minimize always means game mode.
+      // F1 rules (user-locked): from minimized, expand and keep the current
+      // mode (no auto-interactive); from open, minimize and ALWAYS hand the
+      // mouse back to the game. Minimize therefore can never leave an
+      // interactive-but-invisible fullscreen click-eater behind.
       unsubs.push(api.onToggleCollapse(() => {
         const st = useStore.getState()
         if (st.collapsed) {
           st.setCollapsed(false)
-          st.setClickThrough(false)
         } else {
           st.setCollapsed(true)
           st.setClickThrough(true)
@@ -111,6 +110,10 @@ function App() {
       }
       unsubs.push(api.onResearchMode(() => {
         const st = useStore.getState()
+        // Typing needs a visible hub: expand first, otherwise F10 would flip
+        // interactive on an invisible window (fullscreen click-eater, nothing
+        // to type into).
+        if (st.collapsed) st.setCollapsed(false)
         if (st.pickerSlot) return // droid selection open — picker owns this press
         st.setActiveTab('rebirth')
         // The tab switch mounts RebirthTab async; focus on the next frame.
@@ -270,7 +273,7 @@ function App() {
         <button
           className="icon-btn"
           title="Expand overlay (F1)"
-          onClick={() => { useStore.getState().setCollapsed(false); useStore.getState().setClickThrough(false) }}
+          onClick={() => { useStore.getState().setCollapsed(false) }}
           style={{ width: 44, height: 44, fontSize: 22, borderRadius: 10, background: 'rgba(10,10,20,0.92)', borderColor: 'var(--gold)' }}
         >🤖</button>
       </div>
