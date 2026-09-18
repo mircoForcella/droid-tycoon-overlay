@@ -637,11 +637,14 @@ app.whenReady().then(async () => {
     broadcast('toggle-collapse')
     for (const w of allWindows()) repaint(w)
   })
-  globalShortcut.register('F10', () => {
-    const toInteractive = isClickThrough
-    setInteractive(toInteractive)
-    if (!toInteractive) return
-    broadcast('focus-input')
+  // F10 research mode: always land interactive on the rebirth search (or the
+  // picker search when a selection is armed). Repeat press wipes the query
+  // for a fresh research — renderer-decided by focus, main just re-fires.
+  // F10 never exits to game (F2 does that). Retries re-send focus-only so a
+  // retry landing mid-keystroke can never eat typed characters.
+  const enterResearchMode = () => {
+    if (isClickThrough) setInteractive(true)
+    broadcast('research-mode')
     // Games often reclaim foreground instantly; re-assert a couple of times.
     for (const ms of [200, 500]) {
       setTimeout(() => {
@@ -651,10 +654,11 @@ app.whenReady().then(async () => {
             w.focus()
           } catch {}
         }
-        broadcast('focus-input')
+        broadcast('research-focus')
       }, ms)
     }
-  })
+  }
+  globalShortcut.register('F10', enterResearchMode)
   // Spot incomes without moving the mouse: hover the droid in-game
   // (click-through ON so the game sees the cursor), press F9.
   setupTray()
@@ -716,14 +720,8 @@ app.whenReady().then(async () => {
     if (isVisible === value) return
     toggleVisibility()
   })
-  // F10 "type now": go interactive and focus whatever input is relevant.
-  // Press again to wipe the inputs and hand control back to the game.
-  ipcMain.on('toggle-type-mode', () => {
-    const toInteractive = isClickThrough
-    setInteractive(toInteractive)
-    if (toInteractive) broadcast('focus-input')
-    else broadcast('clear-inputs')
-  })
+  // Renderer-side Enter key (panel-scoped): same research flow as F10.
+  ipcMain.on('research-mode', enterResearchMode)
 
   ipcMain.handle('get-displays', () => {
     const primaryId = screen.getPrimaryDisplay().id

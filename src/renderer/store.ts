@@ -50,6 +50,13 @@ interface AppState {
   showToast: (msg: string) => void
   rebirthProgress: Record<string, number>
   setRebirthProgress: (path: number, n: number) => void
+  // Research session: query + path survive F1-minimize (component unmounts)
+  // but deliberately NOT relaunch (partialize allowlist below excludes them —
+  // stale research must never greet the next session).
+  rebirthQuery: string
+  setRebirthQuery: (q: string) => void
+  rebirthPath: number
+  setRebirthPath: (n: number) => void
   timersDetached: boolean
   setTimersDetached: (v: boolean) => void
   applyTimersDetached: (v: boolean) => void
@@ -131,6 +138,11 @@ export const useStore = create<AppState>()(
       setRebirthProgress: (path, n) => set((state) => ({
         rebirthProgress: { ...state.rebirthProgress, [path]: Math.max(1, Math.min(35, n)) }
       })),
+
+      rebirthQuery: '',
+      setRebirthQuery: (q) => set({ rebirthQuery: q }),
+      rebirthPath: 1,
+      setRebirthPath: (n) => set({ rebirthPath: n }),
 
       timersDetached: true,
 

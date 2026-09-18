@@ -147,7 +147,7 @@ export function Settings() {
         <kbd>F7</kbd> Timers Tab (last)<br/>
         <kbd>F8</kbd> Collapse / Expand Pull-Tab<br/>
         <kbd>F9</kbd> Spot hover income/s (no mouse move needed)<br/>
-        <kbd>F10</kbd> Type now (focus field / press again for game)<br/>
+        <kbd>F10</kbd> Research (focus search / press again to clear)<br/>
         <kbd>Ctrl+Z</kbd> Undo last placement
       </div>
 

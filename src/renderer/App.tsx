@@ -77,27 +77,46 @@ function App() {
       unsubs.push(api.onClickThroughChanged(setClickThrough))
       unsubs.push(api.onOpenTab((tab) => useStore.getState().setActiveTab(tab as AppState['activeTab'])))
       unsubs.push(api.onToggleCollapse(() => useStore.getState().toggleCollapsed()))
-      unsubs.push(api.onFocusInput(() => {
-        const focusRetry = (el: HTMLInputElement, tries = 5): void => {
-          el.focus()
-          el.select()
-          if (tries <= 0) return
-          setTimeout(() => {
-            if (document.activeElement !== el) focusRetry(el, tries - 1)
-          }, 120)
-        }
-        // Focus whatever is typeable right now: station picker first, then tab search.
-        const picker = document.getElementById('picker-search') as HTMLInputElement | null
-        if (picker) {
-          focusRetry(picker)
-          return
-        }
-        const rebirth = document.getElementById('rebirth-search') as HTMLInputElement | null
-        if (rebirth) {
-          focusRetry(rebirth)
-          return
-        }
-        useStore.getState().showToast('Nothing to type in — open a station first (Droids) or go to Rebirth (F4).')
+      // Research mode (F10 / Enter): land interactive on the rebirth search.
+      // Repeat press while the search already has focus wipes the query for a
+      // fresh research — renderer-decided by focus, no press counting in main.
+      // The droid picker handles itself (it mounts only when open): App stays
+      // out whenever a selection is armed, so Enter still confirms there.
+      const focusRetry = (el: HTMLInputElement, tries = 5): void => {
+        el.focus()
+        el.select()
+        if (tries <= 0) return
+        setTimeout(() => {
+          if (document.activeElement !== el) focusRetry(el, tries - 1)
+        }, 120)
+      }
+      const focusRebirthSearch = (): boolean => {
+        const el = document.getElementById('rebirth-search') as HTMLInputElement | null
+        if (!el) return false
+        focusRetry(el)
+        return true
+      }
+      unsubs.push(api.onResearchMode(() => {
+        const st = useStore.getState()
+        if (st.pickerSlot) return // droid selection open — picker owns this press
+        st.setActiveTab('rebirth')
+        // The tab switch mounts RebirthTab async; focus on the next frame.
+        requestAnimationFrame(() => {
+          const el = document.getElementById('rebirth-search') as HTMLInputElement | null
+          if (!el) return
+          if (document.activeElement === el) st.setRebirthQuery('')
+          focusRetry(el)
+        })
+      }))
+      // Focus-only path for the F10 foreground retries: never switches tabs,
+      // never wipes — a retry landing mid-keystroke must not eat characters.
+      unsubs.push(api.onResearchFocus(() => {
+        const st = useStore.getState()
+        const picker = st.pickerSlot
+          ? (document.getElementById('picker-search') as HTMLInputElement | null)
+          : null
+        if (picker) { focusRetry(picker); return }
+        focusRebirthSearch()
       }))
       unsubs.push(api.onDetectionUpdate((p) => useStore.getState().stageDetections(p.matches)))
       unsubs.push(api.onLiveScanChanged((v) => useStore.getState().setLiveScan(v)))
@@ -165,12 +184,25 @@ function App() {
     }
     // Ctrl+Z undo (overlay-scoped: only fires when the panel itself has focus,
     // so game keys are untouched; native text-field undo wins inside inputs).
+    // Enter (same scope): jump to Rebirth research — unless typing somewhere,
+    // sitting on a button/select (native activation wins), the droid picker
+    // is open (Enter confirms the selection there), or the panel is minimized
+    // (unfocused, unreachable, but guarded anyway).
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
-      const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')
+      const tag = t?.tagName
+      const inField = !!t && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !inField) {
         e.preventDefault()
         useStore.getState().undo()
+        return
+      }
+      if (e.key === 'Enter' && !e.repeat && !e.defaultPrevented && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (inField || tag === 'BUTTON' || (t && t.isContentEditable)) return
+        const st = useStore.getState()
+        if (st.pickerSlot || st.collapsed) return
+        e.preventDefault()
+        api?.researchMode()
       }
     }
     window.addEventListener('keydown', onKey)

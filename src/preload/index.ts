@@ -26,12 +26,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onToggleCollapse: (callback: () => void): Unsub => {
     return sub('toggle-collapse', () => callback())
   },
-  toggleTypeMode: () => ipcRenderer.send('toggle-type-mode'),
-  onFocusInput: (callback: () => void): Unsub => {
-    return sub('focus-input', () => callback())
+  researchMode: () => ipcRenderer.send('research-mode'),
+  onResearchMode: (callback: () => void): Unsub => {
+    return sub('research-mode', () => callback())
   },
-  onClearInputs: (callback: () => void): Unsub => {
-    return sub('clear-inputs', () => callback())
+  onResearchFocus: (callback: () => void): Unsub => {
+    return sub('research-focus', () => callback())
   },
   getDisplays: () => ipcRenderer.invoke('get-displays'),
   setOverlayDisplay: (value: 'all' | number) => ipcRenderer.send('set-overlay-display', value),

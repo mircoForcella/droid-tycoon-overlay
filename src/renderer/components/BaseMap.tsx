@@ -88,13 +88,21 @@ export function DroidPickerModal({ isOpen, onClose, onSelect, category }: {
   const [incomeQ, setIncomeQ] = useState('')
   const [activeIdx, setActiveIdx] = useState(0)
   const spots = useStore(st => st.spots)
-  // Second F10 press (back to game) wipes whatever was typed.
+  // Research mode while the picker is open: focus its search — or wipe it
+  // for a fresh search when already typing there (same repeat rule as the
+  // rebirth search; Enter still confirms the selection, untouched).
   useEffect(() => {
     if (!isOpen) return
-    return window.electronAPI?.onClearInputs?.(() => {
-      setSearch('')
-      setIncomeQ('')
-      setActiveIdx(0)
+    return window.electronAPI?.onResearchMode?.(() => {
+      const el = document.getElementById('picker-search') as HTMLInputElement | null
+      if (!el) return
+      if (document.activeElement === el) {
+        setSearch('')
+        setIncomeQ('')
+        setActiveIdx(0)
+      }
+      el.focus()
+      el.select()
     })
   }, [isOpen])
   if (!isOpen) return null
@@ -150,7 +158,7 @@ export function DroidPickerModal({ isOpen, onClose, onSelect, category }: {
           onChange={e => { setIncomeQ(e.target.value); setActiveIdx(0) }}
           style={{ width: '100%', padding: 8, marginBottom: 4, borderRadius: 6, border: `1px solid ${incomeHits ? 'var(--green)' : 'var(--border)'}`, background: 'rgba(0,0,0,0.4)', color: 'var(--text)' }}
         />
-        <div className="hotkey-hint" style={{ marginBottom: 8 }}>F10 to type • F10 again clears + back to game</div>
+        <div className="hotkey-hint" style={{ marginBottom: 8 }}>F10 to type • F10 again starts a fresh search (Enter confirms • F2 back to game)</div>
         {spots.length > 0 && (
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
             {spots.map((sp, i) => (

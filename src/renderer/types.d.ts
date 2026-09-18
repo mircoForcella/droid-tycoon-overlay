@@ -8,9 +8,9 @@ declare global {
       setVisible: (v: boolean) => void
       onOpenTab: (cb: (tab: string) => void) => () => void
       onToggleCollapse: (cb: () => void) => () => void
-      toggleTypeMode: () => void
-      onFocusInput: (cb: () => void) => () => void
-      onClearInputs: (cb: () => void) => () => void
+      researchMode: () => void
+      onResearchMode: (cb: () => void) => () => void
+      onResearchFocus: (cb: () => void) => () => void
       getDisplays: () => Promise<Array<{ id: number; label: string; primary: boolean }>> | undefined
       setOverlayDisplay: (value: 'all' | number) => void
       setTimersDetached: (detached: boolean) => void

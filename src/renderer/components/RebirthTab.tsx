@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore } from '../store'
 import { REBIRTH_PATHS } from '../data/rebirths'
 import { DROIDS, getDroidDef, getSellValue, formatCredits } from '../data/droidValues'
@@ -15,8 +15,12 @@ function laterUse(path: { steps: Array<{ n: number; requires: Array<{ droidId: s
 }
 
 export function RebirthTab() {
-  const [path, setPath] = useState(1)
-  const [query, setQuery] = useState('')
+  // Query + path live in the store (session-only): F1-minimize unmounts this
+  // tab, and local state would take the research with it.
+  const path = useStore(s => s.rebirthPath)
+  const setPath = useStore(s => s.setRebirthPath)
+  const query = useStore(s => s.rebirthQuery)
+  const setQuery = useStore(s => s.setRebirthQuery)
   const data = REBIRTH_PATHS.find(p => p.path === path)!
   const progress = useStore(s => s.rebirthProgress[String(path)] ?? 1)
   const setProgress = useStore(s => s.setRebirthProgress)
@@ -28,11 +32,6 @@ export function RebirthTab() {
     // controls out of sight when switching paths or stepping RB +/-.
     currentRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [path, progress])
-
-  useEffect(() => {
-    // Second F10 press (back to game) wipes whatever was typed.
-    return window.electronAPI?.onClearInputs?.(() => setQuery(''))
-  }, [])
 
   const q = query.trim().toLowerCase()
   // "sell epic" (or bare "sell") = safe-seller mode for a tier. Anything
@@ -105,7 +104,7 @@ export function RebirthTab() {
         onChange={e => setQuery(e.target.value)}
         style={{ width: '100%', padding: 8, marginBottom: 4, borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.4)', color: 'var(--text)' }}
       />
-      <div className="hotkey-hint" style={{ marginBottom: 4 }}>F10 to type • F10 again clears + back to game</div>
+      <div className="hotkey-hint" style={{ marginBottom: 4 }}>F10 to type • F10 again starts a fresh search (F2 back to game)</div>
 
       {q.length === 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
