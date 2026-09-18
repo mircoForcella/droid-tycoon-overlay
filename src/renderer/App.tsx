@@ -203,6 +203,29 @@ function App() {
         if (st.pickerSlot || st.collapsed) return
         e.preventDefault()
         api?.researchMode()
+        return
+      }
+      // Rebirth-tab keys (panel-scoped like everything above): ↑/↓ step the
+      // current path's rebirth (▲ back / ▼ forward, clamped 1–35 by the
+      // store), 1–5 (row or numpad, NumLock on) jump Path buttons. Scoped to
+      // the open Rebirth tab so arrows keep scrolling everywhere else, and
+      // skipped while typing or while the picker owns the keyboard (it uses
+      // arrows itself and confirms with Enter).
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented) {
+        const st = useStore.getState()
+        if (st.activeTab === 'rebirth' && !st.pickerSlot && !st.collapsed && !inField) {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault()
+            const p = st.rebirthPath
+            const prog = st.rebirthProgress[String(p)] ?? 1
+            st.setRebirthProgress(p, prog + (e.key === 'ArrowUp' ? -1 : 1))
+            return
+          }
+          if (/^[1-5]$/.test(e.key)) {
+            st.setRebirthPath(Number(e.key))
+            return
+          }
+        }
       }
     }
     window.addEventListener('keydown', onKey)

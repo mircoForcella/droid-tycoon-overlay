@@ -104,7 +104,7 @@ export function RebirthTab() {
         onChange={e => setQuery(e.target.value)}
         style={{ width: '100%', padding: 8, marginBottom: 4, borderRadius: 6, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.4)', color: 'var(--text)' }}
       />
-      <div className="hotkey-hint" style={{ marginBottom: 4 }}>F10 to type • F10 again starts a fresh search (F2 back to game)</div>
+      <div className="hotkey-hint" style={{ marginBottom: 4 }}>F10 to type • F10 again starts a fresh search (F2 back to game) • ↑↓ steps • 1–5 paths</div>
 
       {q.length === 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

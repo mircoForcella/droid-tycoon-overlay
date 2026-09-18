@@ -148,6 +148,7 @@ export function Settings() {
         <kbd>F8</kbd> Collapse / Expand Pull-Tab<br/>
         <kbd>F9</kbd> Spot hover income/s (no mouse move needed)<br/>
         <kbd>F10</kbd> Research (focus search / press again to clear)<br/>
+        <kbd>↑</kbd><kbd>↓</kbd> Rebirth step back/forward (Rebirth tab) • <kbd>1</kbd>–<kbd>5</kbd> Path buttons (Rebirth tab)<br/>
         <kbd>Ctrl+Z</kbd> Undo last placement
       </div>
 
