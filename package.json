@@ -8,6 +8,7 @@
     "build": "tsc && vite build && node scripts/copy-ocr-assets.js && node scripts/fetch-ocr-models.js && node scripts/prune-ort.js",
     "copy-ocr": "node scripts/copy-ocr-assets.js",
     "preview": "vite preview",
+    "test:planner": "node scripts/run-planner-tests.js",
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",

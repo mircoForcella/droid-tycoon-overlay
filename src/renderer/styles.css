@@ -117,6 +117,13 @@ body { background: transparent; color: var(--text); }
 .droid-option-card { width: 48px; height: 48px; object-fit: cover; object-position: center 22%; border-radius: 4px; margin-bottom: 4px; }
 .scan-card { width: 28px; height: 28px; object-fit: cover; object-position: center 22%; border-radius: 3px; flex-shrink: 0; }
 .calc-card { width: 22px; height: 22px; object-fit: cover; object-position: center 22%; border-radius: 3px; vertical-align: middle; margin-right: 4px; }
+
+/* Sell route planner tables */
+.plan-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+.plan-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.plan-table td { padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }
+.plan-table td.num, .plan-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plan-sale { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
 .droid-option-name { font-size: 10px; font-weight: 500; margin-bottom: 2px; }
 .droid-option-value { font-size: 9px; color: var(--gold); }
 .droid-option.rarity-mythic { border-color: #ff3366; }

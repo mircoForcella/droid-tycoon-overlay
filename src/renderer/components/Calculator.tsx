@@ -1,6 +1,7 @@
 import { useStore, formatCredits } from '../store'
 import { getIncome, formatIncome } from '../data/income'
 import { getDroidCard } from '../data/droidCards'
+import { SellRoutePlanner } from './SellRoutePlanner'
 
 export function Calculator() {
   const { hasC3PO, toggleC3PO, getTotalSellValue, getTotalIncome, getDroidsByCategory } = useStore()
@@ -33,6 +34,9 @@ export function Calculator() {
         {hasC3PO && <div className="calc-row c3po"><span>C-3PO ×2</span><span>×2</span></div>}
         <div className="calc-row total"><span>TOTAL</span><span>{formatCredits(totalValue)}</span></div>
       </div>
+
+      <div className="section-title" style={{ marginTop: 16 }}>Rebirth Sell Route Planner</div>
+      <SellRoutePlanner />
 
       <div className="section-title" style={{ marginTop: 16 }}>Income / second (base, before boosts)</div>
       <div className="calculator-summary">
