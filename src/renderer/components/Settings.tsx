@@ -138,7 +138,7 @@ export function Settings() {
         <span className="settings-label">Hotkeys</span>
       </div>
       <div className="hotkey-hint">
-        <kbd>F1</kbd> Minimize to tab, mouse back to game / Expand (keeps mode)<br/>
+        <kbd>F1</kbd> Minimize to tab, mouse back to game / Expand (restores pre-minimize mode)<br/>
         <kbd>F2</kbd> Toggle Click-Through<br/>
         <kbd>F3</kbd> Droids Tab<br/>
         <kbd>F4</kbd> Rebirth Tab<br/>

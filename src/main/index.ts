@@ -462,6 +462,9 @@ function applyClickThrough() {
 // focusable:false windows can never receive keystrokes, so typing
 // requires flipping focusable + focusing the window (borderless-safe).
 function setInteractive(enabled: boolean) {
+  // Idempotent: duplicate requests (two panels echoing, repeated keys) must
+  // not re-flip windows, re-focus, repaint, or spam the log.
+  if (isClickThrough === !enabled) return
   isClickThrough = !enabled
   for (const w of allWindows()) {
     try {

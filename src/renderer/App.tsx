@@ -16,6 +16,14 @@ function Toast() {
   return <div className="toast">{toast.msg}</div>
 }
 
+// Expand the hub, restoring the interaction mode from before minimizing.
+// Shared by the F1 handler and the pull-tab button so both behave identically.
+function expandHub() {
+  const st = useStore.getState()
+  st.setCollapsed(false)
+  if (st.expandToInteractive) st.setClickThrough(false)
+}
+
 function App() {
   const { activeTab, clickThrough, setClickThrough, collapsed } = useStore()
   const timersDetached = useStore(s => s.timersDetached)
@@ -76,15 +84,18 @@ function App() {
     if (api) {
       unsubs.push(api.onClickThroughChanged(setClickThrough))
       unsubs.push(api.onOpenTab((tab) => useStore.getState().setActiveTab(tab as AppState['activeTab'])))
-      // F1 rules (user-locked): from minimized, expand and keep the current
-      // mode (no auto-interactive); from open, minimize and ALWAYS hand the
-      // mouse back to the game. Minimize therefore can never leave an
-      // interactive-but-invisible fullscreen click-eater behind.
+      // F1 rules (user-locked): from minimized, expand and restore the mode
+      // from before minimizing (interact → F1 → F1 lands interactive again,
+      // no F2 needed; minimizing from game mode restores game mode); from
+      // open, minimize and ALWAYS hand the mouse back to the game. Minimize
+      // therefore can never leave an interactive-but-invisible fullscreen
+      // click-eater behind.
       unsubs.push(api.onToggleCollapse(() => {
         const st = useStore.getState()
         if (st.collapsed) {
-          st.setCollapsed(false)
+          expandHub()
         } else {
+          st.setExpandToInteractive(!st.clickThrough)
           st.setCollapsed(true)
           st.setClickThrough(true)
         }
@@ -273,7 +284,7 @@ function App() {
         <button
           className="icon-btn"
           title="Expand overlay (F1)"
-          onClick={() => { useStore.getState().setCollapsed(false) }}
+          onClick={() => expandHub()}
           style={{ width: 44, height: 44, fontSize: 22, borderRadius: 10, background: 'rgba(10,10,20,0.92)', borderColor: 'var(--gold)' }}
         >🤖</button>
       </div>
