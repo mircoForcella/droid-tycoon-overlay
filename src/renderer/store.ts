@@ -76,10 +76,6 @@ interface AppState {
   toggleC3PO: () => void
   setClickThrough: (value: boolean) => void
   setCollapsed: (v: boolean) => void
-  // F1 expand restores the mode from before minimizing (session-only): the
-  // common loop is interact → F1 → F1 → interact again with zero extra keys.
-  expandToInteractive: boolean
-  setExpandToInteractive: (v: boolean) => void
   setLiveScan: (v: boolean) => void
   setScanIntervalMs: (ms: number) => void
   // Stage scan matches as reviewable suggestions (never auto-overwrites manual slots)
@@ -223,9 +219,6 @@ export const useStore = create<AppState>()(
       },
 
       setCollapsed: (v) => set({ collapsed: v }),
-
-      expandToInteractive: false,
-      setExpandToInteractive: (v) => set({ expandToInteractive: v }),
 
       setLiveScan: (v) => set({ liveScan: v }),
 

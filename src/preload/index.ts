@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onToggleCollapse: (callback: () => void): Unsub => {
     return sub('toggle-collapse', () => callback())
   },
+  onExpandHub: (callback: () => void): Unsub => {
+    return sub('expand-hub', () => callback())
+  },
+  onPanelFocusLost: (callback: () => void): Unsub => {
+    return sub('panel-focus-lost', () => callback())
+  },
   researchMode: () => ipcRenderer.send('research-mode'),
   onResearchMode: (callback: () => void): Unsub => {
     return sub('research-mode', () => callback())

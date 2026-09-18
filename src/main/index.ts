@@ -49,6 +49,47 @@ function broadcast(channel: string, ...args: unknown[]) {
   }
 }
 
+// Foreground-loss watch: the game can reclaim foreground (and hide the OS
+// cursor via pointer capture) on its own state changes while the overlay is
+// interactive — no background window can veto that. What we CAN do is notice
+// within a second and say so, naming the blind recoveries (F10/F2), instead
+// of leaving dead clicks and an invisible cursor unexplained. Deliberately
+// notify-only: auto-stealing focus back would start a cursor war mid-round.
+let focusStolenNotified = false
+const focusWatched = new WeakSet<BrowserWindow>()
+function anyOursFocused(): boolean {
+  try {
+    const f = BrowserWindow.getFocusedWindow()
+    if (!f || f.isDestroyed()) return false
+    if (f === spotWin) return true
+    return allWindows().some(w => w === f)
+  } catch {
+    return false
+  }
+}
+function watchFocus(w: BrowserWindow) {
+  if (focusWatched.has(w)) return
+  focusWatched.add(w)
+  try {
+    w.on('blur', () => {
+      // Check late, not now: focus hopping between our own windows (panel
+      // ↔ timer ↔ popup, F10 retries) blurs constantly and legitimately.
+      setTimeout(() => {
+        try {
+          if (!isClickThrough && !anyOursFocused() && !focusStolenNotified && !appQuitting) {
+            focusStolenNotified = true
+            broadcast('panel-focus-lost')
+            log('panel lost focus while interactive (game likely reclaimed foreground)')
+          }
+        } catch {}
+      }, 800)
+    })
+    w.on('focus', () => {
+      focusStolenNotified = false
+    })
+  } catch {}
+}
+
 // Force a compositor repaint. Transparent always-on-top windows can keep a
 // stale DWM frame after state flips (collapse toggles, click-through
 // focus/mouse-event flips, window rebuilds): content shrinks or shifts a few
@@ -156,6 +197,7 @@ function buildWindow(x: number, y: number, w: number, h: number): BrowserWindow 
   win.setIgnoreMouseEvents(isClickThrough, { forward: true })
   win.setMenuBarVisibility(false)
   win.setAlwaysOnTop(true, 'screen-saver')
+  watchFocus(win)
   win.webContents.on('did-finish-load', () => log(`renderer loaded OK (${w}x${h})`))
   win.webContents.on('did-fail-load', (_e, code, desc) => log(`renderer FAILED ${code} ${desc}`))
   loadTarget(win)
@@ -260,6 +302,7 @@ function createTimerWindow() {
   timerWin.setIgnoreMouseEvents(isClickThrough, { forward: true })
   timerWin.setMenuBarVisibility(false)
   timerWin.setAlwaysOnTop(true, 'screen-saver')
+  watchFocus(timerWin)
   if (!isVisible) timerWin.hide()
   let saveT: NodeJS.Timeout | null = null
   const saveBounds = () => {
@@ -385,6 +428,7 @@ function openSpotWindow(spots: SpotPayload[]) {
   try {
     spotWin.showInactive()
   } catch {}
+  if (spotWin) watchFocus(spotWin)
   try {
     spotWin.setIgnoreMouseEvents(false)
     spotWin.setFocusable(true)
@@ -629,7 +673,12 @@ app.whenReady().then(async () => {
     // so the old large frame can't linger as a ghost.
     for (const w of allWindows()) repaint(w)
   })
-  globalShortcut.register('F2', () => toggleClickThrough())
+  globalShortcut.register('F2', () => {
+    toggleClickThrough()
+    // A minimized hub must never hold a mode its user can't see: F2 opens it.
+    // (Mode flip itself is the toggle above; expand is a no-op when open.)
+    broadcast('expand-hub')
+  })
   // Tabs left-to-right: F3 Droids, F4 Rebirth, F5 Calculator, F6 Setup, F7 Timers (last)
   globalShortcut.register('F3', () => broadcast('open-tab', 'droids'))
   globalShortcut.register('F4', () => broadcast('open-tab', 'rebirth'))

@@ -16,12 +16,11 @@ function Toast() {
   return <div className="toast">{toast.msg}</div>
 }
 
-// Expand the hub, restoring the interaction mode from before minimizing.
-// Shared by the F1 handler and the pull-tab button so both behave identically.
+// Expand the hub without touching the interaction mode: only F2 (and the
+// research keys) ever change who gets the mouse. Shared by the F1 handler
+// and the pull-tab button so both behave identically.
 function expandHub() {
-  const st = useStore.getState()
-  st.setCollapsed(false)
-  if (st.expandToInteractive) st.setClickThrough(false)
+  useStore.getState().setCollapsed(false)
 }
 
 function App() {
@@ -84,21 +83,29 @@ function App() {
     if (api) {
       unsubs.push(api.onClickThroughChanged(setClickThrough))
       unsubs.push(api.onOpenTab((tab) => useStore.getState().setActiveTab(tab as AppState['activeTab'])))
-      // F1 rules (user-locked): from minimized, expand and restore the mode
-      // from before minimizing (interact → F1 → F1 lands interactive again,
-      // no F2 needed; minimizing from game mode restores game mode); from
-      // open, minimize and ALWAYS hand the mouse back to the game. Minimize
-      // therefore can never leave an interactive-but-invisible fullscreen
-      // click-eater behind.
+      // F1 rules (user-locked): from minimized, expand and change NOTHING —
+      // only F2 ever changes who gets the mouse. From open, minimize and
+      // ALWAYS hand the mouse back to the game, so minimize can never leave
+      // an interactive-but-invisible fullscreen click-eater behind.
       unsubs.push(api.onToggleCollapse(() => {
         const st = useStore.getState()
         if (st.collapsed) {
           expandHub()
         } else {
-          st.setExpandToInteractive(!st.clickThrough)
           st.setCollapsed(true)
           st.setClickThrough(true)
         }
+      }))
+      // F2 expands a minimized hub (mode flip itself happens main-side):
+      // a hub you can't see must never hold a mode you can't observe.
+      unsubs.push(api.onExpandHub(() => {
+        if (useStore.getState().collapsed) expandHub()
+      }))
+      // Game reclaimed foreground while interactive (its own state change —
+      // no background window can veto that): say so immediately and name the
+      // blind recoveries, instead of dead clicks + invisible cursor mystery.
+      unsubs.push(api.onPanelFocusLost(() => {
+        useStore.getState().showToast('🖱️ Panel lost focus — F10 to resume typing, F2 for the mouse')
       }))
       // Research mode (F10 / Enter): land interactive on the rebirth search.
       // Repeat press while the search already has focus wipes the query for a

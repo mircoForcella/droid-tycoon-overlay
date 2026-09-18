@@ -8,6 +8,8 @@ declare global {
       setVisible: (v: boolean) => void
       onOpenTab: (cb: (tab: string) => void) => () => void
       onToggleCollapse: (cb: () => void) => () => void
+      onExpandHub: (cb: () => void) => () => void
+      onPanelFocusLost: (cb: () => void) => () => void
       researchMode: () => void
       onResearchMode: (cb: () => void) => () => void
       onResearchFocus: (cb: () => void) => () => void
