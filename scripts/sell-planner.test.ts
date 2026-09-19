@@ -387,4 +387,192 @@ const ABC_UNIT: UnitValueFn = id => {
   console.log('ok real-data smoke')
 }
 
+// ---------- 13. user paint rule: fulfilled req frees the mismatched spare ----------
+
+{
+  const steps = [syn(1, 50, r3(rq('a', 'Gold'), rq(F1, 'Default'), rq(F2, 'Default')))]
+  const unit: UnitValueFn = id => (id.startsWith('zz-') ? 0n : 100000n)
+  const plan = planRoute({
+    steps,
+    fromN: 1,
+    targetT: 1,
+    perk: 0,
+    c3po: false,
+    cashOnHand: 0,
+    roster: [{ id: 'a', paint: 'Gold' }, { id: 'a', paint: 'Default' }, ...FILL_ROSTER.slice(0, 2)],
+    unitValue: unit,
+  })
+  // The Gold fulfills the requirement, so the Default is disposable and sells.
+  assert.equal(plan.steps[0].performed, true)
+  assert.equal(plan.steps[0].sales.length, 1)
+  assert.equal(plan.steps[0].sales[0].paint, 'Default')
+  assert.equal(plan.endingValue, 100000n)
+  console.log('ok user paint rule')
+}
+
+// ---------- 14. lone mismatch held as necessary, never sold ----------
+
+{
+  const steps = [
+    syn(1, 50, r3(rq('b', 'Default'), rq(F1, 'Default'), rq(F2, 'Default'))),
+    syn(2, 10, r3(rq('a', 'Gold'), rq(F1, 'Default'), rq(F2, 'Default'))),
+  ]
+  const unit: UnitValueFn = id => {
+    if (id.startsWith('zz-')) return 0n
+    if (id === 's') return 6000n
+    return 100000n
+  }
+  const plan = planRoute({
+    steps,
+    fromN: 1,
+    targetT: 2,
+    perk: 0,
+    c3po: false,
+    cashOnHand: 0,
+    roster: [
+      { id: 'b', paint: 'Default' },
+      { id: 'a', paint: 'Default' },
+      { id: 's', paint: 'Default' },
+      ...FILL_ROSTER.slice(0, 2),
+    ],
+    unitValue: unit,
+  })
+  assert.equal(plan.steps[0].performed, true)
+  assert.deepEqual(
+    plan.steps[0].sales.map(s => s.id),
+    ['s']
+  )
+  // Step 2 needs (a, Gold); only a mismatched copy is owned → missing halt.
+  assert.equal(plan.steps[1].reqOk, false)
+  // The lone (a, Default) was never sold and is labeled necessary.
+  assert.ok(plan.steps.every(st => st.sales.every(s => s.id !== 'a')))
+  const keepA = plan.keepList.find(k => k.id === 'a' && k.paint === 'Default')
+  assert.ok(keepA && keepA.note === 'necessary' && keepA.keepUntil === 2)
+  console.log('ok lone mismatch held')
+}
+
+// ---------- 15. two of the same: one disposable, one necessary ----------
+
+{
+  const steps = [syn(1, 50, r3(rq('a', 'Gold'), rq(F1, 'Default'), rq(F2, 'Default')))]
+  const unit: UnitValueFn = id => (id.startsWith('zz-') ? 0n : 100000n)
+  const plan = planRoute({
+    steps,
+    fromN: 1,
+    targetT: 1,
+    perk: 0,
+    c3po: false,
+    cashOnHand: 0,
+    roster: [
+      { id: 'a', paint: 'Gold' },
+      { id: 'a', paint: 'Default' },
+      { id: 'a', paint: 'Default' },
+      ...FILL_ROSTER.slice(0, 2),
+    ],
+    unitValue: unit,
+  })
+  assert.equal(plan.steps[0].performed, true)
+  assert.equal(plan.steps[0].sales.length, 1)
+  assert.equal(plan.steps[0].sales[0].paint, 'Default')
+  assert.equal(plan.steps[0].sales[0].qty, 1)
+  const keepA = plan.keepList.find(k => k.id === 'a' && k.paint === 'Default')
+  assert.ok(keepA && keepA.note === 'necessary' && keepA.owned === 1)
+  console.log('ok two of the same')
+}
+
+// ---------- 16. gap mode: walk continues, total missing = Σ shortfalls ----------
+
+{
+  const steps = [
+    syn(1, 100, r3(rq('b', 'Default'), rq(F1, 'Default'), rq(F2, 'Default'))),
+    syn(2, 200, r3(rq('c', 'Default'), rq(F1, 'Default'), rq(F2, 'Default'))),
+    syn(3, 300, r3(rq('d', 'Default'), rq(F1, 'Default'), rq(F2, 'Default'))),
+  ]
+  const unit: UnitValueFn = id => {
+    if (id.startsWith('zz-')) return 0n
+    if (id === 's') return 6000n
+    return 100000n
+  }
+  const plan = planRoute({
+    steps,
+    fromN: 1,
+    targetT: 3,
+    perk: 0,
+    c3po: false,
+    cashOnHand: 0,
+    roster: [
+      { id: 'b', paint: 'Default' },
+      { id: 'c', paint: 'Default' },
+      { id: 'd', paint: 'Default' },
+      { id: 's', paint: 'Default' },
+      ...FILL_ROSTER.slice(0, 2),
+    ],
+    unitValue: unit,
+  })
+  assert.equal(plan.steps.length, 3)
+  assert.ok(plan.steps.every(st => st.hypothetical && !st.performed))
+  assert.equal(plan.furthest, 0)
+  // R1 is short 40; R2/R3 are fantasy-coverable (freed b, then c) with
+  // zero further shortfall — each copy counted exactly once.
+  assert.equal(plan.steps[0].shortfall, toScaledCredits(40))
+  assert.deepEqual(
+    plan.steps[1].sales.map(s => s.id),
+    ['b']
+  )
+  assert.equal(plan.steps[1].shortfall, 0n)
+  assert.deepEqual(
+    plan.steps[2].sales.map(s => s.id),
+    ['c']
+  )
+  assert.equal(plan.steps[2].shortfall, 0n)
+  assert.equal(plan.totalMissing, toScaledCredits(40))
+  assert.equal(plan.steps[0].nearestCover[0].id, 'b')
+  // Gap accounting never distorts the real remainder.
+  assert.equal(plan.endingValue, 306000n)
+  console.log('ok gap total')
+}
+
+// ---------- 17. req-35 lock holds even in gap mode ----------
+
+{
+  const steps = [
+    syn(34, 50, r3(rq('m', 'Default'), rq(F1, 'Default'), rq(F2, 'Default'))),
+    syn(35, 60000, r3(rq('z', 'Stellar'), rq(F1, 'Default'), rq(F2, 'Default'))),
+  ]
+  const unit: UnitValueFn = id => {
+    if (id.startsWith('zz-')) return 0n
+    if (id === 's') return 10000n
+    return 1000000n
+  }
+  const plan = planRoute({
+    steps,
+    fromN: 34,
+    targetT: 35,
+    perk: 0,
+    c3po: false,
+    cashOnHand: 0,
+    roster: [
+      { id: 'z', paint: 'Stellar' },
+      { id: 'm', paint: 'Default' },
+      { id: 's', paint: 'Default' },
+      ...FILL_ROSTER.slice(0, 2),
+    ],
+    unitValue: unit,
+  })
+  assert.equal(plan.steps[0].performed, true)
+  assert.equal(plan.steps[1].hypothetical, true)
+  assert.equal(plan.furthest, 34)
+  assert.equal(plan.totalMissing, toScaledCredits(60000 - 10000))
+  for (const st of plan.steps) {
+    assert.ok(
+      st.sales.every(s => s.id !== 'z'),
+      'req-35 copy touched in gap mode'
+    )
+  }
+  assert.equal(plan.endingValue, 2000000n)
+  const keepZ = plan.keepList.find(k => k.id === 'z')
+  assert.ok(keepZ && keepZ.keepUntil === 35)
+  console.log('ok req-35 in gap mode')
+}
+
 console.log('ALL PLANNER TESTS PASSED')

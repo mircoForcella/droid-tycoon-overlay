@@ -118,8 +118,8 @@ export function SellRoutePlanner() {
             </thead>
             <tbody>
               {plan.steps.map(st => (
-                <tr key={st.r}>
-                  <td style={{ fontWeight: 700 }}>{st.r}</td>
+                <tr key={st.r} style={st.hypothetical ? { opacity: 0.65 } : undefined}>
+                  <td style={{ fontWeight: 700 }}>{st.r}{st.hypothetical && <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}> · gap</span>}</td>
                   <td className="num">{formatScaled(st.cost)}</td>
                   <td>
                     {st.sales.length === 0 && <span style={{ color: 'var(--text-dim)' }}>—</span>}
@@ -164,6 +164,9 @@ export function SellRoutePlanner() {
           <div className="calculator-summary" style={{ marginTop: 8 }}>
             <div className="calc-row"><span>Furthest reachable</span><span>RB {plan.furthest}{plan.furthest < plan.targetT ? ` — stuck at RB ${plan.furthest + 1}` : ''}</span></div>
             <div className="calc-row"><span>Total waste</span><span>{formatScaled(plan.totalWaste)} ({plan.wastePct.toFixed(2)}% of {formatScaled(plan.totalCost)})</span></div>
+            {plan.furthest < plan.targetT && plan.totalMissing > 0n && (
+              <div className="calc-row"><span>Missing to reach RB {plan.targetT}</span><span style={{ color: 'var(--gold)', fontWeight: 700 }}>{formatScaled(plan.totalMissing)} total across {plan.steps.filter(s => s.hypothetical).length} gap step{plan.steps.filter(s => s.hypothetical).length === 1 ? '' : 's'}</span></div>
+            )}
             <div className="calc-row total"><span>Ending roster value</span><span>{formatScaled(plan.endingValue)}</span></div>
           </div>
 
@@ -184,7 +187,9 @@ export function SellRoutePlanner() {
                     <tr key={i}>
                       <td>{copyName(k.id)} <span style={{ color: 'var(--text-dim)' }}>{k.paint}</span></td>
                       <td className="num">{k.keepUntil}</td>
-                      <td>{k.keepUntil >= 35 ? <span style={{ color: 'var(--gold)', fontWeight: 700 }}>never sell</span> : `sellable from ${k.keepUntil + 1}`}</td>
+                      <td>{k.note === 'necessary'
+                        ? <span style={{ color: 'var(--gold)' }}>necessary — {copyName(k.id)} needed at RB {k.keepUntil}</span>
+                        : (k.keepUntil >= 35 ? <span style={{ color: 'var(--gold)', fontWeight: 700 }}>never sell</span> : `sellable from ${k.keepUntil + 1}`)}</td>
                       <td className="num">{k.owned}</td>
                     </tr>
                   ))}

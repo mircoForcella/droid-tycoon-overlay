@@ -4,13 +4,25 @@
 // - req(R) = the 3 (id, paint) entries of rebirth R; all matching copies must
 //   be owned simultaneously at the moment R is performed. Performing a
 //   rebirth never consumes droids.
-// - A copy is protected at step R while any rebirth R' in [R, 35] requires
-//   its exact (id, paint) — the filter always spans to 35, regardless of the
-//   plan target. Only copies beyond the max-simultaneous need are sell
-//   candidates (surplus), plus paint-mismatched copies and valued fusions.
+// - A copy is protected at step R while its droid id is needed anywhere in
+//   [R, 35] (any paint — the filter always spans to 35, regardless of the
+//   plan target). Retention is id-level and exact-first: copies whose exact
+//   (id, paint) is required ahead are held first; a held copy whose paint
+//   matches no upcoming requirement is labeled "necessary" (upgrade/backup
+//   candidate — the player is never left with zero copies of a needed id).
+//   Only copies beyond the max-simultaneous id need are sell candidates
+//   (surplus), plus valued fusions. Exact paint matching still governs the
+//   req(R) ownership check — a mismatched copy never fulfills a requirement.
 // - Cash resets every step: carry-in is cash-on-hand at the first step only,
 //   0 afterwards. Nothing carries across a rebirth.
 // - Waste(R) = sales(R) + carryIn(R) − cost(R), minimized per step.
+// - Gap mode: a step whose cost no sellable subset can cover does NOT halt
+//   the walk. It records its shortfall, consumes its sellable pool once
+//   into the gap accounting, and the walk continues — later-unlocking
+//   copies (freed after their last use) fund later steps. Total missing to
+//   the goal = Σ shortfalls over unfunded steps. Required droids are never
+//   consumed. Missing requirements (unowned req copies) still halt: skipped
+//   rebirths cannot be hypothesized past.
 // - Strategy v1 (solveStep, swappable): exact branch-and-bound over
 //   integer-scaled values when candidates ≤ 20, else greedy descending +
 //   drop-smallest-while-covered improvement. Tie-break: fewer items, then
@@ -85,6 +97,9 @@ export interface PlanStep {
   cashAfter: bigint
   reqOk: boolean
   performed: boolean
+  /** True for gap-mode rows: cost recorded, pool consumed once into the gap,
+   *  step not performed. Never set on performed or missing-req rows. */
+  hypothetical: boolean
   missing: MissingReq[]
   shortfall: bigint
   nearestCover: CoverOption[]
@@ -97,6 +112,9 @@ export interface KeepEntry {
   paint: Quality
   keepUntil: number
   owned: number
+  /** 'necessary' for held copies whose paint matches no upcoming requirement
+   *  (upgrade/backup candidate — never sold while the id is needed ahead). */
+  note?: string
 }
 
 export interface PlanResult {
@@ -111,6 +129,9 @@ export interface PlanResult {
   wastePct: number
   /** Sale value of the unsold remainder under the same perk/companion terms. */
   endingValue: bigint
+  /** Σ shortfalls over unfunded steps: the total still required to reach
+   *  the goal. 0 when the goal is reached. */
+  totalMissing: bigint
   keepList: KeepEntry[]
   warnings: string[]
 }
@@ -154,6 +175,46 @@ export function neededCounts(steps: readonly RebirthStep[], fromR: number): Map<
     }
   }
   return need
+}
+
+/**
+ * Max simultaneous copies of one droid id (any paint) required by any step
+ * in [fromR, 35]. Retention is counted at id level: while an id is needed
+ * ahead, the player keeps that many copies of it (exact paints first).
+ */
+export function needIdCounts(steps: readonly RebirthStep[], fromR: number): Map<string, number> {
+  const need = new Map<string, number>()
+  for (const s of steps) {
+    if (s.n < fromR || s.n > 35) continue
+    const perId = new Map<string, number>()
+    for (const r of s.requires) perId.set(r.droidId, (perId.get(r.droidId) ?? 0) + 1)
+    for (const [id, v] of perId) {
+      if (v > (need.get(id) ?? 0)) need.set(id, v)
+    }
+  }
+  return need
+}
+
+/** Last rebirth in 1..35 requiring an id (any paint), or null. */
+export function lastIdRequirement(steps: readonly RebirthStep[], id: string): number | null {
+  let last: number | null = null
+  for (const s of steps) {
+    if (s.n < 1 || s.n > 35) continue
+    if (s.requires.some(r => r.droidId === id)) {
+      if (last === null || s.n > last) last = s.n
+    }
+  }
+  return last
+}
+
+/** Exact (id, paint) keys required by any step in [fromR, 35]. */
+function requiredKeysInWindow(steps: readonly RebirthStep[], fromR: number): Set<string> {
+  const keys = new Set<string>()
+  for (const s of steps) {
+    if (s.n < fromR || s.n > 35) continue
+    for (const r of s.requires) keys.add(copyKey(r.droidId, r.quality))
+  }
+  return keys
 }
 
 /** Last rebirth in 1..35 requiring (id, paint), or null when never required. */
@@ -291,6 +352,29 @@ function freedAfter(steps: readonly RebirthStep[], step: RebirthStep): FreedEntr
   return out
 }
 
+interface Cand {
+  ri: number
+  id: string
+  paint: Quality
+  unit: bigint
+}
+
+/** Group picked candidates into per-(id, paint) sale lines, first-seen order. */
+function groupSales(picked: readonly Cand[]): SaleLine[] {
+  const groups = new Map<string, SaleLine>()
+  for (const c of picked) {
+    const k = copyKey(c.id, c.paint)
+    const g = groups.get(k)
+    if (g) {
+      g.qty += 1
+      g.total += c.unit
+    } else {
+      groups.set(k, { id: c.id, paint: c.paint, qty: 1, unit: c.unit, total: c.unit })
+    }
+  }
+  return [...groups.values()]
+}
+
 export function planRoute(opts: PlannerOptions): PlanResult {
   const warnings: string[] = []
   const steps = [...opts.steps].sort((a, b) => a.n - b.n)
@@ -308,6 +392,7 @@ export function planRoute(opts: PlannerOptions): PlanResult {
       totalCost: 0n,
       wastePct: 0,
       endingValue: 0n,
+      totalMissing: 0n,
       keepList: [],
       warnings: [`target rebirth ${targetT} is below current rebirth ${fromN} — nothing to plan`],
     }
@@ -325,7 +410,12 @@ export function planRoute(opts: PlannerOptions): PlanResult {
   const planSteps: PlanStep[] = []
   let totalWaste = 0n
   let totalCost = 0n
+  let totalMissing = 0n
   let furthest = fromN - 1
+  // Real roster at the first funding wall: ending value and keep-owned
+  // counts are read from this, so gap-mode pool consumption (accounting
+  // only) never distorts them.
+  let wallSnapshot: RosterCopy[] | null = null
   const warnedMissing = new Set<string>()
 
   for (let r = fromN; r <= targetT; r++) {
@@ -358,6 +448,7 @@ export function planRoute(opts: PlannerOptions): PlanResult {
         cashAfter: 0n,
         reqOk: false,
         performed: false,
+        hypothetical: false,
         missing,
         shortfall: 0n,
         nearestCover: [],
@@ -371,32 +462,35 @@ export function planRoute(opts: PlannerOptions): PlanResult {
       break
     }
 
-    // Candidates: owned copies beyond the max-simultaneous need in [r, 35].
-    const protect = neededCounts(steps, r)
-    const byKey = new Map<string, number[]>()
+    // Candidates: owned copies beyond the max-simultaneous ID need in
+    // [r, 35]. Exact paints (required ahead) are retained first; held
+    // mismatches stay as "necessary" copies. A lone copy of a needed id is
+    // therefore never sold, while a fulfilled requirement frees its
+    // mismatched spares (sold first by the min-cover solver).
+    const needId = needIdCounts(steps, r)
+    const exactKeys = requiredKeysInWindow(steps, r)
+    const byId = new Map<string, number[]>()
     remaining.forEach((c, i) => {
-      const k = copyKey(c.id, c.paint)
-      const arr = byKey.get(k)
+      const arr = byId.get(c.id)
       if (arr) arr.push(i)
-      else byKey.set(k, [i])
+      else byId.set(c.id, [i])
     })
     const retainedIdx = new Set<number>()
     const candIdx: number[] = []
-    for (const [k, idxs] of byKey) {
-      const prot = protect.get(k) ?? 0
-      idxs.forEach((ri, j) => {
+    for (const [id, idxs] of byId) {
+      const prot = Math.min(idxs.length, needId.get(id) ?? 0)
+      const exactFirst = [...idxs].sort((a, b) => {
+        const ae = exactKeys.has(copyKey(remaining[a].id, remaining[a].paint)) ? 0 : 1
+        const be = exactKeys.has(copyKey(remaining[b].id, remaining[b].paint)) ? 0 : 1
+        return ae - be
+      })
+      exactFirst.forEach((ri, j) => {
         if (j < prot) retainedIdx.add(ri)
         else candIdx.push(ri)
       })
     }
 
     // Value the candidates; copies without sale data are excluded + warned.
-    interface Cand {
-      ri: number
-      id: string
-      paint: Quality
-      unit: bigint
-    }
     const cands: Cand[] = []
     for (const ri of candIdx) {
       const c = remaining[ri]
@@ -438,6 +532,7 @@ export function planRoute(opts: PlannerOptions): PlanResult {
         cashAfter,
         reqOk: true,
         performed: true,
+        hypothetical: false,
         missing: [],
         shortfall: 0n,
         nearestCover: [],
@@ -448,11 +543,19 @@ export function planRoute(opts: PlannerOptions): PlanResult {
       continue
     }
 
+    // Past the first funding wall every step is gap accounting only: the
+    // route cannot proceed past an unperformed rebirth, so fantasy steps
+    // never perform and never advance furthest — but their unlocked pools
+    // still count toward the total gap exactly once.
+    const walled = wallSnapshot !== null
     const pick = solveStep(
       cands.map(c => c.unit),
       needCash
     )
+    // Nearest-cover options, only when no subset covers (informational).
+    let cover: CoverOption[] = []
     if (!pick) {
+      if (!wallSnapshot) wallSnapshot = remaining.map(c => ({ ...c }))
       const total = cands.reduce((a, c) => a + c.unit, 0n)
       const shortfall = needCash - total
       // Nearest covering options from protected copies (explicitly marked).
@@ -467,11 +570,10 @@ export function planRoute(opts: PlannerOptions): PlanResult {
         if (a.unit !== b.unit) return a.unit > b.unit ? -1 : 1
         return a.id < b.id ? -1 : 1
       })
-      const nearestCover: CoverOption[] = []
       let acc = 0n
       for (const rc of retained) {
         if (acc >= shortfall) break
-        nearestCover.push({
+        cover.push({
           id: rc.id,
           paint: rc.paint,
           unit: rc.unit,
@@ -486,41 +588,37 @@ export function planRoute(opts: PlannerOptions): PlanResult {
       if (acc < shortfall) {
         warnings.push(`rebirth ${r}: even selling every protected copy still falls short`)
       }
+    }
+
+    // pick ?? consume-all (gap mode); walled-but-coverable steps apply
+    // their min-cover into the gap without performing.
+    const picked = pick ? pick.map(pi => cands[pi]) : [...cands]
+    const sales = groupSales(picked)
+    const salesSum = sales.reduce((a, s) => a + s.total, 0n)
+    for (const ri of picked.map(c => c.ri).sort((a, b) => b - a)) {
+      remaining.splice(ri, 1)
+    }
+    if (!pick || walled) {
+      // Unfunded row: shortfall (zero when the fantasy pool covers), sales
+      // applied once into the gap, step not performed, furthest untouched.
+      if (!pick) totalMissing += needCash - salesSum
       planSteps.push({
         r,
         cost,
         carryIn,
-        sales: [],
-        salesSum: 0n,
+        sales,
+        salesSum,
         cashAfter: 0n,
         reqOk: true,
         performed: false,
+        hypothetical: true,
         missing: [],
-        shortfall,
-        nearestCover,
+        shortfall: pick ? 0n : needCash - salesSum,
+        nearestCover: pick ? [] : cover,
         waste: 0n,
         freed: [],
       })
-      break
-    }
-
-    const chosenSet = new Set(pick.map(pi => cands[pi].ri))
-    const groups = new Map<string, SaleLine>()
-    for (const pi of pick) {
-      const c = cands[pi]
-      const k = copyKey(c.id, c.paint)
-      const g = groups.get(k)
-      if (g) {
-        g.qty += 1
-        g.total += c.unit
-      } else {
-        groups.set(k, { id: c.id, paint: c.paint, qty: 1, unit: c.unit, total: c.unit })
-      }
-    }
-    const sales = [...groups.values()]
-    const salesSum = sales.reduce((a, s) => a + s.total, 0n)
-    for (const ri of [...chosenSet].sort((a, b) => b - a)) {
-      remaining.splice(ri, 1)
+      continue
     }
     const cashAfter = salesSum + carryIn - cost
     totalWaste += cashAfter
@@ -534,6 +632,7 @@ export function planRoute(opts: PlannerOptions): PlanResult {
       cashAfter,
       reqOk: true,
       performed: true,
+      hypothetical: false,
       missing: [],
       shortfall: 0n,
       nearestCover: [],
@@ -543,18 +642,21 @@ export function planRoute(opts: PlannerOptions): PlanResult {
     furthest = r
   }
 
+  // Real (performed-route) roster: gap-mode consumption is accounting only.
+  const endRoster = wallSnapshot ?? remaining
   let endingValue = 0n
-  for (const c of remaining) {
+  for (const c of endRoster) {
     const u = valueOf(c.id, c.paint)
     if (u !== undefined && u > 0n) endingValue += u
   }
   const wastePct = totalCost > 0n ? Number((totalWaste * 10000n + totalCost / 2n) / totalCost) / 100 : 0
 
-  // Keep list: every (id, paint) required in [fromN, 35] with its last use.
-  // Fusion droids are never requirements, so they never appear here.
+  // Keep list: every (id, paint) required in [fromN, 35] with its last use,
+  // plus held mismatches (id needed ahead, paint never required) labeled
+  // "necessary". Fusion droids are never requirements, so they never appear.
   const keepList: KeepEntry[] = []
   const seenKeep = new Set<string>()
-  const endHave = countBy(remaining)
+  const endHave = countBy(endRoster)
   for (const s of steps) {
     if (s.n < fromN || s.n > 35) continue
     for (const rq of s.requires) {
@@ -569,6 +671,14 @@ export function planRoute(opts: PlannerOptions): PlanResult {
       })
     }
   }
+  for (const [k, qty] of endHave) {
+    if (seenKeep.has(k)) continue
+    const [id, paint] = splitKey(k)
+    const lastId = lastIdRequirement(steps, id)
+    if (lastId !== null && lastId >= fromN) {
+      keepList.push({ id, paint, keepUntil: lastId, owned: qty, note: 'necessary' })
+    }
+  }
   keepList.sort((a, b) => a.keepUntil - b.keepUntil || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
   return {
@@ -580,6 +690,7 @@ export function planRoute(opts: PlannerOptions): PlanResult {
     totalCost,
     wastePct,
     endingValue,
+    totalMissing,
     keepList,
     warnings,
   }
